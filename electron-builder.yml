@@ -1,0 +1,54 @@
+# electron-builder config for POS Desktop.
+#
+# Per-outlet builds: override productName/appId via env vars before building,
+# e.g.:
+#   POS_PRODUCT_NAME="POS Kasir - Toko Jakarta" POS_APP_ID="id.nursa.pos.jkt01" npm run dist
+#
+# Defaults — override per-outlet via env vars before running `npm run dist`
+# (see scripts/build-outlet.js), since electron-builder.yml itself doesn't
+# support env-var fallback syntax reliably across versions.
+appId: id.nursa.pos.desktop
+productName: POS Desktop
+copyright: Copyright © 2026
+
+directories:
+  output: dist-installer
+  buildResources: build
+
+files:
+  - main/**/*
+  - server/**/*
+  - renderer/dist/**/*
+  - renderer/login.html
+  - package.json
+  - "!renderer/src/**/*"
+  - "!renderer/node_modules/**/*"
+  - "!renderer/index.html"
+  - "!**/*.map"
+
+extraResources: []
+
+# SQLite DB file, credentials, and device config live in userData — never
+# touched by the installer/uninstaller.
+asarUnpack:
+  - "**/*.node"
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # No custom icon yet — electron-builder falls back to its own default.
+  # Add build/icon.ico (256x256) and uncomment to brand the installer/app:
+  # icon: build/icon.ico
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+# Each outlet's build gets a distinct appId/productName (see env vars above),
+# so installs on different outlet machines never collide, and Windows treats
+# them as separate applications (separate Start Menu entry, separate
+# userData folder derived from productName).

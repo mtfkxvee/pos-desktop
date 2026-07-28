@@ -1,0 +1,136 @@
+import {
+	deleteDraft,
+	getDraftsCount,
+	saveDraft,
+	getAllDrafts,
+	updateDraft,
+} from "@/utils/draftManager"
+import { useToast } from "@/composables/useToast"
+import { defineStore } from "pinia"
+import { ref } from "vue"
+
+export const usePOSDraftsStore = defineStore("posDrafts", () => {
+	// Use custom toast
+	const { showSuccess, showError, showWarning } = useToast()
+
+	// State
+	const draftsCount = ref(0)
+	const drafts = ref([])
+
+	// Actions
+	async function updateDraftsCount() {
+		try {
+			draftsCount.value = await getDraftsCount()
+		} catch (error) {
+			console.error("Error getting drafts count:", error)
+		}
+	}
+
+	async function loadDrafts() {
+		try {
+			drafts.value = await getAllDrafts()
+			draftsCount.value = drafts.value.length
+		} catch (error) {
+			console.error("Error loading drafts:", error)
+		}
+	}
+
+	async function saveDraftInvoice(
+		invoiceItems,
+		customer,
+		posProfile,
+		appliedOffers = [],
+		draftId = null,
+		extraData = {},
+	) {
+		if (invoiceItems.length === 0) {
+			showWarning(__("Cannot save an empty cart as draft"))
+			return null
+		}
+
+		try {
+			// Strip promo data so items are saved at their original prices.
+			// On load, forceRefreshOffers() reapplies promos from applied_offers.
+			// Saving discounted rates causes double-discount on reload because the
+			// server applies the same discount again to an already-reduced price.
+			const cleanItems = invoiceItems
+				.filter((item) => !item.is_free_item)
+				.map((item) => ({
+					...item,
+					rate: item.price_list_rate || item.rate,
+					discount_percentage: 0,
+					discount_amount: 0,
+					pricing_rules: [],
+					free_qty: 0,
+				}))
+
+			const draftData = {
+				pos_profile: posProfile,
+				customer: customer,
+				items: cleanItems,
+				applied_offers: appliedOffers,
+				...extraData,
+			}
+
+			let savedDraft
+			if (draftId) {
+				savedDraft = await updateDraft(draftId, draftData)
+			} else {
+				savedDraft = await saveDraft(draftData)
+			}
+
+			await loadDrafts() // Refresh drafts list and count
+
+			showSuccess(__("Invoice saved as draft successfully"))
+
+			return savedDraft
+		} catch (error) {
+			console.error("Error saving draft:", error)
+			showError(__("Failed to save draft"))
+			return null
+		}
+	}
+
+	async function loadDraft(draft) {
+		try {
+			showSuccess(__("Draft invoice loaded successfully"))
+
+			return {
+				items: draft.items || [],
+				customer: draft.customer,
+				applied_offers: draft.applied_offers || [], // Restore applied offers
+				additionalDiscount: draft.additionalDiscount || 0,
+				appliedCoupon: draft.appliedCoupon || null,
+				loyaltyData: draft.loyaltyData || {},
+			}
+		} catch (error) {
+			console.error("Error loading draft:", error)
+			showError(__("Failed to load draft"))
+			throw error
+		}
+	}
+
+	async function deleteDraftById(draftId) {
+		try {
+			await deleteDraft(draftId)
+			await loadDrafts() // Refresh drafts list and count
+			showSuccess(__("Draft deleted successfully"))
+		} catch (error) {
+			console.error("Error deleting draft:", error)
+			showError(__("Failed to delete draft"))
+		}
+	}
+
+	return {
+		// State
+		draftsCount,
+		drafts,
+
+		// Actions
+		updateDraftsCount,
+		loadDrafts,
+		saveDraftInvoice,
+		loadDraft,
+		deleteDraft: deleteDraftById,
+	}
+})

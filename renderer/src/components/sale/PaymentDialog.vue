@@ -1,0 +1,2647 @@
+<template>
+	<Dialog v-model="show" :options="{ title: isSalesOrder ? __('Complete Sales Order') : __('Complete Payment'), size: dynamicDialogSize }">
+		<template #body-content>
+			<!-- Two Column Layout - auto-sized on mobile, constrained on desktop -->
+			<div
+				:class="[
+					'grid grid-cols-1 lg:grid-cols-5 items-stretch',
+					dynamicGap,
+					isMobileView ? '' : 'overflow-hidden'
+				]"
+				:style="isMobileView ? {} : { maxHeight: dialogContentMaxHeight }"
+			>
+				<!-- Left Column (2/5): Sales Person + Invoice Summary -->
+				<div
+					:class="[
+						'lg:col-span-2 flex flex-col min-h-0',
+						isSmallMobile ? 'gap-1' : 'gap-1.5',
+						isMobileView ? 'overflow-visible' : 'overflow-hidden'
+					]"
+					:style="{ maxHeight: isMobileView ? 'none' : dynamicLeftColumnHeight }"
+				>
+					<!-- Delivery Date for Sales Orders -->
+					<div v-if="isSalesOrder" class="bg-orange-50 border border-orange-200 rounded-lg p-2">
+						<div class="flex items-center gap-2">
+							<svg class="w-4 h-4 text-orange-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+							</svg>
+							<label class="text-xs font-medium text-orange-700 flex-shrink-0">{{ __("Delivery Date") }}</label>
+							<input
+								type="date"
+								v-model="deliveryDate"
+								:min="today"
+								class="flex-1 h-8 border border-orange-300 rounded-lg px-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-transparent bg-white"
+							/>
+						</div>
+					</div>
+
+					<!-- Sales Person Selection (Compact) -->
+					<div v-if="settingsStore.enableSalesPersons" :class="[
+						'rounded-lg p-2',
+						!isSalesPersonValid ? 'bg-red-50 border-2 border-red-300' : 'bg-purple-50 border border-purple-200'
+					]">
+						<!-- Single Mode: Show selected person or dropdown -->
+						<template v-if="settingsStore.isSingleSalesPerson">
+							<!-- Show selected person as a nice display -->
+							<div v-if="selectedSalesPersons.length > 0" class="flex items-center justify-between">
+								<div class="flex items-center gap-2">
+									<svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+									</svg>
+									<span class="text-sm font-medium text-gray-900">
+										{{ selectedSalesPersons[0].sales_person_name || selectedSalesPersons[0].sales_person }}
+									</span>
+								</div>
+								<button
+									@click="clearSalesPersons"
+									class="text-purple-500 hover:text-purple-700 p-1 rounded hover:bg-purple-100"
+									:title="__('Change sales person')"
+								>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4"/>
+									</svg>
+								</button>
+							</div>
+							<!-- Show dropdown when no selection -->
+							<div v-else ref="salesPersonDropdownRef">
+								<label class="text-xs font-medium text-purple-700 flex items-center gap-1 mb-1">
+									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+									</svg>
+									{{ __('Sales Person') }}
+									<span class="text-red-500">*</span>
+								</label>
+								<div class="relative">
+									<input
+										v-model="salesPersonSearch"
+										type="text"
+										:placeholder="__('Select sales person...')"
+										@focus="salesPersonDropdownOpen = true"
+										@blur="handleSalesPersonBlur"
+										class="w-full px-3 py-2 ps-3 pe-8 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+										:class="!isSalesPersonValid ? 'border-red-300' : 'border-purple-300'"
+									/>
+									<svg
+										class="w-4 h-4 text-purple-500 absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none transition-transform"
+										:class="{ 'rotate-180': salesPersonDropdownOpen }"
+										fill="none" stroke="currentColor" viewBox="0 0 24 24"
+									>
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+									</svg>
+									<!-- Dropdown -->
+									<div
+										v-if="salesPersonDropdownOpen && availableSalesPersons.length > 0"
+										class="absolute z-50 mt-1 w-full max-h-40 overflow-y-auto border border-purple-200 rounded-lg bg-white shadow-lg"
+									>
+										<div
+											v-for="person in availableSalesPersons"
+											:key="person.name"
+											@mousedown.prevent="addSalesPerson(person)"
+											class="flex items-center justify-between p-2 hover:bg-purple-50 cursor-pointer border-b border-purple-100 last:border-b-0 text-xs"
+										>
+											<span class="font-medium text-gray-900">{{ person.sales_person_name || person.name }}</span>
+											<span v-if="person.commission_rate" class="text-purple-500 text-[10px]">
+												{{ person.commission_rate }}% {{ __('comm.') }}
+											</span>
+										</div>
+									</div>
+									<!-- No Results -->
+									<div
+										v-if="salesPersonDropdownOpen && availableSalesPersons.length === 0 && !loadingSalesPersons"
+										class="absolute z-50 mt-1 w-full border border-purple-200 rounded-lg bg-white shadow-lg"
+									>
+										<div class="text-center py-3 text-xs text-gray-500">
+											{{ __('No sales persons available') }}
+										</div>
+									</div>
+								</div>
+								<!-- Validation message -->
+								<div v-if="!isSalesPersonValid" class="mt-1 text-xs text-red-600 flex items-center gap-1">
+									<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+										<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+									</svg>
+									{{ __('Sales person is required') }}
+								</div>
+							</div>
+						</template>
+
+						<!-- Multiple Mode: Show label, dropdown, and chips -->
+						<template v-else>
+							<!-- Label with required indicator -->
+							<div class="flex items-center justify-between mb-1.5">
+								<label class="text-xs font-medium text-purple-700 flex items-center gap-1">
+									<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/>
+									</svg>
+									{{ __('Sales Persons') }}
+									<span class="text-red-500">*</span>
+								</label>
+								<span v-if="selectedSalesPersons.length > 0" class="text-[10px] text-purple-600">
+									{{ __('Total: {0}%', [Math.round(totalSalesAllocation)]) }}
+								</span>
+							</div>
+
+							<!-- Search Input with dropdown -->
+							<div class="relative" ref="salesPersonDropdownRef">
+								<input
+									v-model="salesPersonSearch"
+									type="text"
+									:placeholder="selectedSalesPersons.length > 0
+										? __('Add another...')
+										: __('Select sales person...')"
+									@focus="salesPersonDropdownOpen = true"
+									@blur="handleSalesPersonBlur"
+									class="w-full px-3 py-2 ps-3 pe-8 text-xs border rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500 focus:border-transparent bg-white"
+									:class="!isSalesPersonValid ? 'border-red-300' : 'border-purple-300'"
+								/>
+								<svg
+									class="w-4 h-4 text-purple-500 absolute end-2 top-1/2 -translate-y-1/2 pointer-events-none transition-transform"
+									:class="{ 'rotate-180': salesPersonDropdownOpen }"
+									fill="none" stroke="currentColor" viewBox="0 0 24 24"
+								>
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+								</svg>
+
+								<!-- Dropdown Results -->
+								<div
+									v-if="salesPersonDropdownOpen && availableSalesPersons.length > 0"
+									class="absolute z-50 mt-1 w-full max-h-40 overflow-y-auto border border-purple-200 rounded-lg bg-white shadow-lg"
+								>
+									<div
+										v-for="person in availableSalesPersons"
+										:key="person.name"
+										@mousedown.prevent="addSalesPerson(person)"
+										class="flex items-center justify-between p-2 hover:bg-purple-50 cursor-pointer border-b border-purple-100 last:border-b-0 text-xs"
+									>
+										<span class="font-medium text-gray-900">{{ person.sales_person_name || person.name }}</span>
+										<span v-if="person.commission_rate" class="text-purple-500 text-[10px]">
+											{{ person.commission_rate }}% {{ __('comm.') }}
+										</span>
+									</div>
+								</div>
+
+								<!-- No Results -->
+								<div
+									v-if="salesPersonDropdownOpen && availableSalesPersons.length === 0 && !loadingSalesPersons"
+									class="absolute z-50 mt-1 w-full border border-purple-200 rounded-lg bg-white shadow-lg"
+								>
+									<div class="text-center py-3 text-xs text-gray-500">
+										{{ salesPersons.length === 0 ? __('No sales persons available') : __('All sales persons selected') }}
+									</div>
+								</div>
+							</div>
+
+							<!-- Validation message -->
+							<div v-if="!isSalesPersonValid" class="mt-1 text-xs text-red-600 flex items-center gap-1">
+								<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
+								</svg>
+								{{ __('Sales person is required') }}
+							</div>
+
+							<!-- Selected Sales Persons (chips) -->
+							<div v-if="selectedSalesPersons.length > 0" class="mt-2 flex flex-wrap gap-1">
+								<div
+									v-for="person in selectedSalesPersons"
+									:key="person.sales_person"
+									class="inline-flex items-center gap-1 px-2 py-1 bg-purple-100 border border-purple-300 rounded text-xs"
+								>
+									<span class="font-medium text-gray-900 truncate max-w-[120px]">
+										{{ person.sales_person_name || person.sales_person }}
+									</span>
+									<span class="text-purple-600 font-semibold">
+										{{ Math.round(person.allocated_percentage) }}%
+									</span>
+									<button
+										@click="removeSalesPerson(person.sales_person)"
+										class="text-purple-500 hover:text-purple-700"
+									>
+										<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+											<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+										</svg>
+									</button>
+								</div>
+								<!-- Clear all button -->
+								<button
+									v-if="selectedSalesPersons.length > 1"
+									@click="clearSalesPersons"
+									class="inline-flex items-center gap-1 px-2 py-1 text-xs text-red-600 hover:text-red-700"
+								>
+									<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+										<path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd"/>
+									</svg>
+									{{ __('Clear all') }}
+								</button>
+							</div>
+						</template>
+					</div>
+
+					<!-- Outstanding Balance Row (full width, two columns) -->
+					<div v-if="customerCreditEnabled && totalAvailableCredit !== 0" :class="[
+						'rounded-lg border p-2 flex items-center justify-between',
+						totalAvailableCredit < 0
+							? 'bg-red-50 border-red-200'
+							: 'bg-emerald-50 border-emerald-200'
+					]">
+						<span :class="[
+							'text-xs font-semibold',
+							totalAvailableCredit < 0 ? 'text-red-700' : 'text-emerald-700'
+						]">
+							{{ totalAvailableCredit < 0 ? __('Outstanding Balance') : __('Credit Balance') }}
+						</span>
+						<!-- Show remaining credit (after used amount is deducted) for positive balance -->
+						<span :class="[
+							'text-base font-bold',
+							totalAvailableCredit < 0 ? 'text-red-600' : 'text-emerald-600'
+						]">
+							{{ totalAvailableCredit < 0 ? formatCurrency(Math.abs(totalAvailableCredit)) : formatCurrency(remainingAvailableCredit) }}
+						</span>
+					</div>
+
+					<!-- Invoice Summary -->
+					<div class="bg-white rounded-lg border border-gray-200 overflow-hidden flex flex-col flex-1 min-h-0">
+						<!-- Header -->
+						<div :class="['px-3 border-b border-gray-200 bg-gray-50', isCompactMode ? 'py-1.5' : 'py-2']">
+							<div class="flex items-center justify-between">
+								<h3 :class="['text-gray-900 font-semibold text-start', dynamicTextSize.header]">{{ __('Invoice Summary') }}</h3>
+								<span class="text-gray-500 text-xs text-end">{{ items.length === 1 ? __('1 item') : __('{0} items', [items.length]) }}</span>
+							</div>
+							<div v-if="customer" class="text-gray-600 text-xs mt-0.5 text-start">
+								{{ customer?.customer_name || customer?.name || customer }}
+							</div>
+						</div>
+
+						<!-- Items List (scrollable, takes available space) -->
+						<div v-if="items.length > 0" class="flex-1 overflow-y-auto divide-y divide-gray-100 min-h-0">
+							<div
+								v-for="(item, index) in items"
+								:key="index"
+								class="px-3 py-2 hover:bg-gray-50"
+							>
+								<div class="flex items-start justify-between gap-2">
+									<div class="flex-1 min-w-0 text-start">
+										<div class="font-medium text-sm text-gray-900 truncate">{{ item.item_name || item.item_code }}</div>
+										<div class="text-xs text-gray-500 mt-0.5">
+											{{ formatCurrency(item.rate || item.price_list_rate) }} × {{ item.qty || item.quantity }}
+										</div>
+									</div>
+									<div class="text-sm font-semibold text-gray-900 text-end">
+										{{ formatCurrency(item.amount || ((item.qty || item.quantity) * (item.rate || item.price_list_rate))) }}
+									</div>
+								</div>
+							</div>
+						</div>
+						<div v-else class="flex-1 px-3 py-4 text-center text-gray-400 text-sm flex items-center justify-center">
+							{{ __('No items') }}
+						</div>
+
+						<!-- Amounts Breakdown -->
+						<div class="border-t border-gray-200 bg-gray-50 px-3 py-2 space-y-1">
+							<!-- Additional Discount Row -->
+							<div v-if="settingsStore.allowAdditionalDiscount" class="pb-1.5 mb-1 border-b border-dashed border-orange-200">
+								<!-- Label with calculated amount -->
+								<div class="flex items-center justify-between gap-2 mb-1.5">
+									<div class="flex items-center gap-1.5 min-w-0">
+										<svg class="w-3.5 h-3.5 text-orange-600 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+										</svg>
+										<span class="text-xs font-medium text-orange-700">{{ __('Additional Discount') }}</span>
+									</div>
+									<span v-if="localAdditionalDiscount > 0" class="text-xs font-bold text-red-600">
+										-{{ formatCurrency(calculatedAdditionalDiscount) }}
+									</span>
+								</div>
+								<!-- Discount / Compliment Button -->
+								<div class="flex items-center gap-2">
+									<div class="flex-1">
+										<button
+											@click="handleDiscountButtonClick"
+											class="w-full flex items-center justify-center gap-2 px-3 py-2 bg-white border border-orange-300 rounded-lg text-orange-600 hover:bg-orange-50 transition-colors text-sm font-medium"
+										>
+											<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/>
+											</svg>
+											{{ additionalDiscount > 0 ? __('Edit Discount / Compliment') : __('Add Discount / Compliment') }}
+										</button>
+									</div>
+								</div>
+							</div>
+							<!-- Loyalty Points Redemption Row (forced to show) -->
+							<div class="pb-1.5 mb-1 border-b border-dashed border-amber-200">
+								<div class="flex items-center justify-between gap-2 mb-1.5">
+									<div class="flex items-center gap-1.5 min-w-0">
+										<svg class="w-3.5 h-3.5 flex-shrink-0" :class="loyaltyPointInfo.loyalty_points > 0 ? 'text-amber-600' : 'text-gray-400'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+										</svg>
+										<span class="text-xs font-medium" :class="loyaltyPointInfo.loyalty_points > 0 ? 'text-amber-700' : 'text-gray-500'">{{ __('Redeem Loyalty Points') }}</span>
+									</div>
+									<span v-if="isPointsRedemptionActive && redeemedLoyaltyAmount > 0" class="text-xs font-bold text-amber-600">
+										-{{ formatCurrency(redeemedLoyaltyAmount) }}
+									</span>
+								</div>
+								
+								<div v-if="!isPointsRedemptionActive" class="flex gap-2">
+									<!-- Inline confirmation -->
+									<div v-if="showLoyaltyConfirm" class="w-full flex flex-col gap-1.5">
+										<p class="text-xs text-amber-700 font-medium text-center">
+											{{ __('Pakai {0} poin ({1})?', [maxRedeemablePoints, formatCurrency(maxRedeemablePoints * (loyaltyPointInfo.conversion_factor || 1))]) }}
+										</p>
+										<div class="flex gap-2">
+											<button
+												@click="showLoyaltyConfirm = false"
+												class="flex-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors"
+											>{{ __('Batal') }}</button>
+											<button
+												@click="activateLoyaltyRedemption"
+												class="flex-1 px-3 py-1.5 rounded-lg text-sm font-medium border border-amber-400 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+											>{{ __('Ya, Pakai') }}</button>
+										</div>
+									</div>
+									<button
+										v-else
+										@click="showLoyaltyConfirm = true"
+										:disabled="loyaltyPointInfo.loyalty_points === 0"
+										:class="[
+											'w-full flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors border',
+											loyaltyPointInfo.loyalty_points > 0
+												? 'bg-white border-amber-300 text-amber-600 hover:bg-amber-50'
+												: 'bg-gray-100 border-gray-200 text-gray-400 cursor-not-allowed opacity-70'
+										]"
+									>
+										{{ __('Use Points') }} ({{ loyaltyPointInfo.loyalty_points }} {{ __('available') }})
+									</button>
+								</div>
+								<div v-else class="flex flex-col gap-1.5">
+									<div class="flex items-center gap-2">
+										<input
+											v-model.number="pointsToRedeem"
+											type="number"
+											min="0"
+											:max="loyaltyPointInfo.loyalty_points"
+											class="w-full h-8 px-2 text-sm border border-amber-300 rounded focus:outline-none focus:ring-1 focus:ring-amber-500"
+										/>
+										<button
+											@click="isPointsRedemptionActive = false; pointsToRedeem = 0; showLoyaltyConfirm = false"
+											class="p-1.5 text-red-500 hover:bg-red-50 rounded"
+										>
+											<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+												<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+											</svg>
+										</button>
+									</div>
+									<span class="text-[10px] text-gray-500">{{ __('1 point =') }} {{ formatCurrency(loyaltyPointInfo.conversion_factor) }}</span>
+								</div>
+							</div>
+
+							<!-- Subtotal -->
+							<div class="flex items-center justify-between text-sm">
+								<span class="text-gray-600 text-start">{{ __('Subtotal') }}</span>
+								<span class="font-medium text-gray-900 text-end">{{ formatCurrency(subtotal) }}</span>
+							</div>
+							<!-- Tax -->
+							<div v-if="taxAmount > 0" class="flex items-center justify-between text-sm">
+								<span class="text-gray-600 text-start">{{ __('Tax') }}</span>
+								<span class="font-medium text-gray-900 text-end">{{ formatCurrency(taxAmount) }}</span>
+							</div>
+							<!-- Discount (shows the calculated additional discount amount) -->
+							<div v-if="discountAmount > 0" class="flex items-center justify-between text-sm">
+								<span class="text-gray-600 text-start">{{ __('Discount') }}</span>
+								<span class="font-medium text-red-600 text-end">-{{ formatCurrency(discountAmount) }}</span>
+							</div>
+							<!-- Pembulatan (rounding adjustment) -->
+							<div v-if="roundingAdjustment !== 0" class="flex items-center justify-between text-sm">
+								<span class="text-gray-500 text-start italic">{{ __('Pembulatan') }}</span>
+								<span :class="['font-medium text-end italic', roundingAdjustment > 0 ? 'text-blue-600' : 'text-red-500']">
+									{{ roundingAdjustment > 0 ? '+' : '' }}{{ formatCurrency(roundingAdjustment) }}
+								</span>
+							</div>
+							<!-- Grand Total -->
+							<div class="flex items-center justify-between pt-2 mt-1 border-t border-gray-300">
+								<span :class="['font-bold text-gray-900 text-start', isCompactMode ? 'text-sm' : 'text-base']">{{ __('Grand Total') }}</span>
+								<span :class="['font-bold text-gray-900 text-end', dynamicTextSize.grandTotal]">{{ formatCurrency(grandTotal) }}</span>
+							</div>
+						</div>
+
+						<!-- Payment Status - Two Equal Halves -->
+						<div class="border-t border-gray-200">
+							<div class="grid grid-cols-2 divide-x divide-gray-200">
+								<!-- Paid (Left Half) -->
+								<div :class="['bg-blue-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+									<div class="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1">{{ __('Paid') }}</div>
+									<div :class="['font-bold text-blue-600', dynamicTextSize.amount]">{{ formatCurrency(totalPaid) }}</div>
+								</div>
+								<!-- Remaining / Change (Right Half) -->
+								<div v-if="remainingAmount > 0 && !applyWriteOff" :class="['bg-orange-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+									<div class="text-xs font-medium text-orange-600 uppercase tracking-wide mb-1">{{ __('Remaining') }}</div>
+									<div :class="['font-bold text-orange-600', dynamicTextSize.amount]">{{ formatCurrency(remainingAmount) }}</div>
+								</div>
+								<!-- Write-off Applied -->
+								<div v-else-if="applyWriteOff && canWriteOff" :class="['bg-purple-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+									<div class="text-xs font-medium text-purple-600 uppercase tracking-wide mb-1">{{ __('Write Off') }}</div>
+									<div :class="['font-bold text-purple-600', dynamicTextSize.amount]">{{ formatCurrency(writeOffAmount) }}</div>
+								</div>
+								<div v-else-if="changeAmount > 0 && allowsOverpayment" :class="['bg-green-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+									<div class="text-xs font-medium text-green-600 uppercase tracking-wide mb-1">{{ __('Change Due') }}</div>
+									<div :class="['font-bold text-green-600', dynamicTextSize.amount]">{{ formatCurrency(changeAmount) }}</div>
+								</div>
+								<!-- Exact Amount Warning (when overpayment not allowed) -->
+								<div v-else-if="changeAmount > 0 && !allowsOverpayment" :class="['bg-red-50 text-center', isCompactMode ? 'p-2' : 'p-3']">
+									<div class="text-xs font-medium text-red-600 uppercase tracking-wide mb-1">{{ __('Overpayment') }}</div>
+									<div :class="['font-bold text-red-600', dynamicTextSize.amount]">{{ formatCurrency(changeAmount) }}</div>
+								</div>
+								<div v-else :class="['bg-green-50 flex flex-col items-center justify-center', isCompactMode ? 'p-2' : 'p-3']">
+									<svg class="w-5 h-5 text-green-600 mb-1" fill="currentColor" viewBox="0 0 20 20">
+										<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+									</svg>
+									<span :class="['font-bold text-green-600', dynamicTextSize.body]">{{ __('Fully Paid') }}</span>
+								</div>
+							</div>
+						</div>
+
+						<!-- Write-Off Toggle -->
+						<div v-if="canWriteOff" class="border-t border-gray-200 px-4 py-3 bg-white">
+							<div class="flex items-center justify-between mb-1.5">
+								<span class="text-xs font-medium text-gray-500 uppercase tracking-wider">{{ __('Write Off') }}</span>
+								<span class="text-xs text-gray-400">{{ __('Max') }}: {{ formatCurrency(writeOffLimit) }}</span>
+							</div>
+							<div
+								class="relative h-12 rounded-lg overflow-hidden select-none cursor-pointer border"
+								:class="applyWriteOff ? 'bg-teal-500 border-teal-500' : 'bg-gray-100 border-gray-200'"
+								@click="applyWriteOff = !applyWriteOff"
+								style="transition: all 0.25s ease"
+							>
+								<!-- Center Text -->
+								<div class="absolute inset-0 flex items-center justify-center z-10">
+									<span
+										class="text-base font-semibold tracking-wide"
+										:class="applyWriteOff ? 'text-white' : 'text-gray-700'"
+									>
+										{{ formatCurrency(remainingAmount) }}
+									</span>
+								</div>
+
+								<!-- Toggle Handle -->
+								<div
+									class="absolute top-1.5 bottom-1.5 w-11 rounded-md flex items-center justify-center z-20 bg-white border border-gray-200"
+									:style="{
+										left: applyWriteOff ? 'calc(100% - 3rem)' : '0.375rem',
+										transition: 'left 0.25s cubic-bezier(0.4, 0, 0.2, 1)',
+										boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+									}"
+								>
+									<svg v-if="applyWriteOff" class="w-5 h-5 text-teal-500" fill="currentColor" viewBox="0 0 20 20">
+										<path fill-rule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clip-rule="evenodd"/>
+									</svg>
+									<svg v-else class="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+									</svg>
+								</div>
+							</div>
+						</div>
+					</div>
+				</div>
+				<!-- End Left Column -->
+
+				<!-- Right Column (3/5): Payment Methods + Quick Amounts + Numpad -->
+				<div
+					ref="rightColumnRef"
+					:class="[
+						'lg:col-span-3 bg-gray-50 rounded-lg border border-gray-200 flex flex-col overflow-y-auto',
+						isSmallMobile ? 'p-1.5' : 'p-2 lg:p-3'
+					]"
+					:style="isMobileView ? {} : { minHeight: rightColumnMinHeight }"
+				>
+					<!-- Payment Methods -->
+					<div :class="isSmallMobile ? 'mb-1' : 'mb-1.5 lg:mb-3'">
+						<div :class="['flex items-center justify-between', isSmallMobile ? 'mb-0.5' : 'mb-1 lg:mb-2']">
+							<div :class="['text-start font-semibold text-gray-500 uppercase tracking-wide', isSmallMobile ? 'text-[10px]' : 'text-xs']">{{ __('Payment Method') }}</div>
+							<!-- Clear All Payments Button -->
+							<button
+								v-if="paymentEntries.length > 0"
+								@click="clearAll"
+								:class="['text-red-500 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors', isSmallMobile ? 'p-1' : 'p-1.5']"
+								:title="__('Clear all payments')"
+							>
+								<svg :class="isSmallMobile ? 'w-4 h-4' : 'w-5 h-5'" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+								</svg>
+							</button>
+						</div>
+						<div v-if="loadingPaymentMethods" class="flex items-center gap-2">
+							<div :class="['animate-spin rounded-full border-b-2 border-blue-500', isSmallMobile ? 'h-4 w-4' : 'h-5 w-5']"></div>
+							<span :class="['text-gray-500', isSmallMobile ? 'text-xs' : 'text-sm']">{{ __('Loading...') }}</span>
+						</div>
+						<div v-else-if="filteredPaymentMethods.length > 0" :class="['flex flex-wrap', isSmallMobile ? 'gap-1' : 'gap-1.5 lg:gap-2']">
+							<!-- Cash: single method, no dropdown - selects directly -->
+							<button
+								v-if="cashPaymentMethod"
+								@pointerdown="onPaymentMethodDown(cashPaymentMethod, $event)"
+								@pointerup="onPaymentMethodUp(cashPaymentMethod)"
+								@pointerleave="onPaymentMethodCancel"
+								@pointercancel="onPaymentMethodCancel"
+								:class="[
+									'inline-flex items-center rounded-lg border-2 transition-all font-medium select-none touch-none',
+									isSmallMobile ? 'gap-0.5 px-1.5 h-7 text-[10px]' : 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
+									isMethodSelected(cashPaymentMethod)
+										? 'border-blue-500 bg-blue-50 text-blue-700'
+										: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700'
+								]"
+							>
+								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">{{ getPaymentIcon(cashPaymentMethod.type) }}</span>
+								<span class="truncate max-w-[80px] lg:max-w-none">{{ __('Cash') }}</span>
+								<!-- Payment Amount Badge -->
+								<span v-if="getMethodTotal(cashPaymentMethod.mode_of_payment) > 0"
+									:class="['font-bold rounded', isSmallMobile ? 'text-[8px] px-0.5 py-0.5' : 'text-xs px-1 py-0.5', 'text-blue-600 bg-blue-100']">
+									{{ formatCurrency(getMethodTotal(cashPaymentMethod.mode_of_payment)) }}
+								</span>
+							</button>
+
+							<!-- Debit: dropdown listing all Debit-tagged methods -->
+							<div v-if="debitPaymentMethods.length > 0" ref="debitDropdownRef" class="relative">
+								<button
+									@click="toggleDebitDropdown"
+									:class="[
+										'inline-flex items-center rounded-lg border-2 transition-all font-medium select-none',
+										isSmallMobile ? 'gap-0.5 px-1.5 h-7 text-[10px]' : 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
+										selectedDebitMethod
+											? 'border-blue-500 bg-blue-50 text-blue-700'
+											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700'
+									]"
+								>
+									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">{{ getPaymentIcon(selectedDebitMethod?.type || debitPaymentMethods[0].type) }}</span>
+									<span class="truncate max-w-[80px] lg:max-w-none">{{ selectedDebitMethod ? __(selectedDebitMethod.mode_of_payment) : __('Debit') }}</span>
+									<span v-if="selectedDebitMethod && getMethodTotal(selectedDebitMethod.mode_of_payment) > 0"
+										:class="['font-bold rounded', isSmallMobile ? 'text-[8px] px-0.5 py-0.5' : 'text-xs px-1 py-0.5', 'text-blue-600 bg-blue-100']">
+										{{ formatCurrency(getMethodTotal(selectedDebitMethod.mode_of_payment)) }}
+									</span>
+									<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+									</svg>
+								</button>
+								<div
+									v-if="debitDropdownOpen"
+									class="absolute z-30 mt-1 min-w-[10rem] bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
+								>
+									<button
+										v-for="method in debitPaymentMethods"
+										:key="method.mode_of_payment"
+										@click="selectCategoryMethod(method)"
+										:class="[
+											'w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-start transition-colors',
+											isMethodSelected(method) ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'
+										]"
+									>
+										<span class="truncate">{{ __(method.mode_of_payment) }}</span>
+										<span v-if="getMethodTotal(method.mode_of_payment) > 0" class="text-xs font-bold text-blue-600 bg-blue-100 rounded px-1 py-0.5">
+											{{ formatCurrency(getMethodTotal(method.mode_of_payment)) }}
+										</span>
+									</button>
+								</div>
+							</div>
+
+							<!-- Transfer: dropdown listing all Transfer-tagged methods -->
+							<div v-if="transferPaymentMethods.length > 0" ref="transferDropdownRef" class="relative">
+								<button
+									@click="toggleTransferDropdown"
+									:class="[
+										'inline-flex items-center rounded-lg border-2 transition-all font-medium select-none',
+										isSmallMobile ? 'gap-0.5 px-1.5 h-7 text-[10px]' : 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
+										selectedTransferMethod
+											? 'border-blue-500 bg-blue-50 text-blue-700'
+											: 'border-gray-200 bg-white hover:border-blue-400 hover:bg-blue-50 text-gray-700'
+									]"
+								>
+									<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">{{ getPaymentIcon(selectedTransferMethod?.type || transferPaymentMethods[0].type) }}</span>
+									<span class="truncate max-w-[80px] lg:max-w-none">{{ selectedTransferMethod ? __(selectedTransferMethod.mode_of_payment) : __('Transfer') }}</span>
+									<span v-if="selectedTransferMethod && getMethodTotal(selectedTransferMethod.mode_of_payment) > 0"
+										:class="['font-bold rounded', isSmallMobile ? 'text-[8px] px-0.5 py-0.5' : 'text-xs px-1 py-0.5', 'text-blue-600 bg-blue-100']">
+										{{ formatCurrency(getMethodTotal(selectedTransferMethod.mode_of_payment)) }}
+									</span>
+									<svg class="w-3.5 h-3.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+									</svg>
+								</button>
+								<div
+									v-if="transferDropdownOpen"
+									class="absolute z-30 mt-1 min-w-[10rem] bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden"
+								>
+									<button
+										v-for="method in transferPaymentMethods"
+										:key="method.mode_of_payment"
+										@click="selectCategoryMethod(method)"
+										:class="[
+											'w-full flex items-center justify-between gap-2 px-3 py-2 text-sm text-start transition-colors',
+											isMethodSelected(method) ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700 hover:bg-gray-50'
+										]"
+									>
+										<span class="truncate">{{ __(method.mode_of_payment) }}</span>
+										<span v-if="getMethodTotal(method.mode_of_payment) > 0" class="text-xs font-bold text-blue-600 bg-blue-100 rounded px-1 py-0.5">
+											{{ formatCurrency(getMethodTotal(method.mode_of_payment)) }}
+										</span>
+									</button>
+								</div>
+							</div>
+							<!-- Credit Balance as Payment Method -->
+							<button
+								v-if="customerCreditEnabled && (remainingAvailableCredit > 0 || getMethodTotal('Customer Credit') > 0)"
+								@click="applyCustomerCredit"
+								:disabled="remainingAmount === 0 || remainingAvailableCredit === 0"
+								:class="[
+									'inline-flex items-center rounded-lg border-2 transition-all font-medium',
+									isSmallMobile ? 'gap-0.5 px-1.5 h-7 text-[10px]' : 'gap-1 lg:gap-2 px-2.5 lg:px-4 h-8 text-xs lg:h-11 lg:text-sm',
+									remainingAmount === 0 || remainingAvailableCredit === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer',
+									getMethodTotal('Customer Credit') > 0
+										? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+										: 'border-emerald-300 bg-emerald-50 hover:border-emerald-500 hover:bg-emerald-100 text-emerald-700'
+								]"
+							>
+								<span :class="isSmallMobile ? 'text-xs' : 'text-sm lg:text-lg'">💳</span>
+								<span class="truncate">{{ __('Credit Balance') }}</span>
+								<span v-if="getMethodTotal('Customer Credit') > 0"
+									:class="['font-bold text-emerald-600 bg-emerald-100 rounded', isSmallMobile ? 'text-[8px] px-0.5 py-0.5' : 'text-xs px-1 py-0.5']">
+									{{ formatCurrency(getMethodTotal('Customer Credit')) }}
+								</span>
+							</button>
+						</div>
+						<div v-else :class="['text-gray-500', isSmallMobile ? 'text-xs' : 'text-sm']">{{ __('No payment methods available') }}</div>
+
+						<!-- Exact Amount Mode Info Banner -->
+						<div v-if="isExactAmountModeActive && paymentEntries.length > 0 && hasNonCashPayment"
+							:class="['mt-2 p-2 rounded-lg border', !isExactAmountValid ? 'bg-red-50 border-red-200' : 'bg-green-50 border-green-200']">
+							<div class="flex items-center gap-2">
+								<svg v-if="!isExactAmountValid" class="w-4 h-4 flex-shrink-0 text-red-500" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd"/>
+								</svg>
+								<svg v-else class="w-4 h-4 flex-shrink-0 text-green-500" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+								</svg>
+								<span :class="['text-xs font-medium', !isExactAmountValid ? 'text-red-700' : 'text-green-700']">
+									{{ !isExactAmountValid ? __('Total must equal invoice amount') : __('Payment amount is correct') }}
+								</span>
+							</div>
+						</div>
+					</div>
+
+					<!-- Quick Amounts Area (Desktop) - Consistent layout for all payment methods -->
+					<div v-if="lastSelectedMethod && remainingAmount > 0" class="hidden lg:block" :class="isCompactMode ? 'mb-2' : 'mb-3'">
+						<div class="text-start text-xs font-medium text-gray-600 mb-1.5">
+							{{ (isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod))
+								? __('Exact amount only')
+								: __('Quick amounts for {0}', [__(lastSelectedMethod.mode_of_payment)])
+							}}
+						</div>
+						<div class="grid grid-cols-3 gap-1.5">
+							<button
+								v-for="amount in quickAmounts"
+								:key="amount"
+								@click="addCustomPayment(lastSelectedMethod, amount)"
+								:disabled="isQuickAmountDisabled(amount)"
+								:class="[
+									'font-semibold rounded-lg border-2 transition-all',
+									isCompactMode ? 'px-2 py-2 text-sm' : 'px-2 py-2 text-sm',
+									isQuickAmountDisabled(amount)
+										? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+										: 'bg-white border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-700 hover:text-blue-600'
+								]"
+							>
+								{{ formatCurrency(amount) }}
+							</button>
+						</div>
+					</div>
+					<div v-else-if="!lastSelectedMethod && remainingAmount > 0" class="hidden lg:block" :class="['bg-blue-50 rounded-lg text-center', isCompactMode ? 'mb-2 p-2' : 'mb-3 p-3 lg:p-2']">
+						<p class="text-xs text-blue-600">{{ __('Select a payment method to start') }}</p>
+					</div>
+
+					<!-- Mobile Payment Section - Dynamic & Responsive -->
+					<div class="lg:hidden flex flex-col" :class="isSmallMobile ? 'gap-1' : 'gap-1.5'">
+						<!-- Mobile Quick Amounts + Custom Input (consistent layout for all payment methods) -->
+						<div v-if="lastSelectedMethod && remainingAmount > 0" :class="['space-y-1 flex-shrink-0', isSmallMobile ? 'mb-1' : 'mb-1.5']">
+							<!-- Quick Amounts Row (4 columns, responsive sizing) -->
+							<div class="grid grid-cols-3" :class="isSmallMobile ? 'gap-0.5' : 'gap-1'">
+								<button
+									v-for="amount in quickAmounts"
+									:key="amount"
+									@click="addCustomPayment(lastSelectedMethod, amount)"
+									:disabled="isQuickAmountDisabled(amount)"
+									:class="[
+										'font-semibold rounded border transition-colors',
+										isSmallMobile ? 'py-1 text-[10px]' : 'py-1.5 text-xs',
+										isQuickAmountDisabled(amount)
+											? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+											: 'bg-white border-gray-200 text-gray-700 active:bg-blue-50 active:border-blue-400'
+									]"
+								>
+									{{ formatCurrency(amount) }}
+								</button>
+							</div>
+
+							<!-- Custom Amount Row (disabled for non-cash when exact amount mode is active) -->
+							<div :class="['flex', isSmallMobile ? 'gap-0.5' : 'gap-1']">
+								<div class="relative flex-1">
+									<span :class="[
+										'absolute start-2 top-1/2 -translate-y-1/2',
+										isSmallMobile ? 'text-[10px]' : 'text-xs',
+										isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) ? 'text-gray-300' : 'text-gray-400'
+									]">{{ currencySymbol }}</span>
+									<input
+										v-model="mobileCustomAmount"
+										type="number"
+										inputmode="decimal"
+										:placeholder="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod) ? __('Exact amount only') : __('Custom')"
+										min="0"
+										step="0.01"
+										:disabled="isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)"
+										:class="[
+											'w-full border rounded focus:outline-none font-semibold',
+											isSmallMobile ? 'h-7 ps-5 pe-1.5 text-xs' : 'h-8 ps-6 pe-2 text-sm',
+											isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)
+												? 'bg-gray-50 border-gray-100 text-gray-300 cursor-not-allowed'
+												: 'bg-white border-gray-200 focus:ring-1 focus:ring-blue-500'
+										]"
+									/>
+								</div>
+								<button
+									@click="addMobileCustomPayment"
+									:disabled="(isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)) || !mobileCustomAmount || mobileCustomAmount <= 0"
+									:class="[
+										'font-semibold rounded transition-all flex-shrink-0',
+										isSmallMobile ? 'h-7 px-2 text-[10px]' : 'h-8 px-3 text-xs',
+										(isExactAmountModeActive && !isCashPaymentMethod(lastSelectedMethod)) || !mobileCustomAmount || mobileCustomAmount <= 0
+											? 'bg-gray-100 text-gray-400'
+											: 'bg-blue-500 text-white active:bg-blue-600'
+									]"
+								>
+									{{ __('Add') }}
+								</button>
+							</div>
+						</div>
+
+						<!-- Mobile: Select payment method prompt -->
+						<div v-else-if="!lastSelectedMethod && remainingAmount > 0"
+							:class="['bg-blue-50 rounded text-center', isSmallMobile ? 'p-1.5 mb-1' : 'p-2 mb-1.5']">
+							<p :class="isSmallMobile ? 'text-[10px]' : 'text-xs'" class="text-blue-600">{{ __('Select a payment method') }}</p>
+						</div>
+
+						<!-- Mobile Action Buttons - Always visible at bottom -->
+						<div :class="['flex-shrink-0', isSmallMobile ? 'space-y-1' : 'space-y-1.5']">
+							<!-- Pay on Account warning banner (mobile) -->
+							<div v-if="payOnAccountWarningActive" class="bg-orange-50 border border-orange-300 rounded-lg p-2 flex items-start gap-2">
+								<svg class="w-4 h-4 text-orange-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+								</svg>
+								<p class="flex-1 text-xs font-medium text-orange-800">{{ __('Transaksi ini adalah piutang apakah kamu yakin untuk input piutang?') }}</p>
+								<button @click="_clearPayOnAccountWarning" class="text-orange-500 hover:text-orange-700 flex-shrink-0 font-bold leading-none">✕</button>
+							</div>
+
+							<!-- Two buttons side by side when both needed -->
+							<div v-if="lastSelectedMethod && remainingAmount > 0 && allowCreditSale && paymentEntries.length === 0"
+								class="grid grid-cols-2" :class="isSmallMobile ? 'gap-1' : 'gap-1.5'">
+								<!-- Pay Full Amount Button -->
+								<button
+									@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+									:class="[
+										'font-bold rounded-lg bg-green-500 text-white active:bg-green-600 flex items-center justify-center',
+										mobileButtonSize.height, mobileButtonSize.text, mobileButtonSize.gap
+									]"
+								>
+									<svg :class="mobileButtonSize.icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+									</svg>
+									<span class="truncate">{{ formatCurrency(remainingAmount) }}</span>
+								</button>
+								<!-- Pay on Account Button (with warning + countdown) -->
+								<button
+									@click="startPayOnAccountWarning"
+									:disabled="isSubmitting || (payOnAccountWarningActive && payOnAccountCountdown > 0)"
+									:class="[
+										'font-semibold rounded-lg flex items-center justify-center',
+										isSubmitting || (payOnAccountWarningActive && payOnAccountCountdown > 0)
+											? 'bg-orange-300 text-white cursor-not-allowed'
+											: payOnAccountWarningActive
+												? 'bg-orange-700 text-white active:bg-orange-800 ring-2 ring-orange-400'
+												: 'bg-orange-500 text-white active:bg-orange-600',
+										mobileButtonSize.height, mobileButtonSize.text, mobileButtonSize.gap
+									]"
+								>
+									<svg v-if="isSubmitting" :class="mobileButtonSize.icon" class="animate-spin" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+									</svg>
+									<span class="truncate">
+										<template v-if="isSubmitting">{{ __('Processing...') }}</template>
+										<template v-else-if="payOnAccountWarningActive && payOnAccountCountdown > 0">{{ payOnAccountCountdown }}s...</template>
+										<template v-else-if="payOnAccountWarningActive">{{ __('Yakin?') }}</template>
+										<template v-else>{{ __('On Account') }}</template>
+									</span>
+								</button>
+							</div>
+
+							<!-- Single Pay button (when no credit sale option) -->
+							<button
+								v-else-if="lastSelectedMethod && remainingAmount > 0"
+								@click="addCustomPayment(lastSelectedMethod, remainingAmount)"
+								:disabled="isSubmitting"
+								:class="[
+									'w-full font-bold rounded-lg flex items-center justify-center',
+									isSubmitting
+										? 'bg-green-300 text-white cursor-not-allowed'
+										: 'bg-green-500 text-white active:bg-green-600',
+									mobileButtonSize.height, mobileButtonSize.text, mobileButtonSize.gap
+								]"
+							>
+								<svg :class="mobileButtonSize.icon" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 9V7a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2m2 4h10a2 2 0 002-2v-6a2 2 0 00-2-2H9a2 2 0 00-2 2v6a2 2 0 002 2zm7-5a2 2 0 11-4 0 2 2 0 014 0z"/>
+								</svg>
+								<span>{{ __('Pay') }} {{ formatCurrency(remainingAmount) }}</span>
+							</button>
+
+							<!-- Complete Payment Button -->
+							<button
+								v-if="(remainingAmount === 0 || (applyWriteOff && canWriteOff)) && (totalPaid > 0 || grandTotal <= 0 || redeemedLoyaltyAmount > 0)"
+								@click="completePayment"
+								:disabled="isSubmitting || !canComplete"
+								:class="[
+									'w-full font-bold rounded-lg flex items-center justify-center',
+									isSubmitting
+										? 'bg-blue-300 text-white cursor-not-allowed'
+										: 'bg-blue-500 text-white active:bg-blue-600',
+									mobileButtonSize.height, mobileButtonSize.text, mobileButtonSize.gap
+								]"
+							>
+								<svg v-if="isSubmitting" :class="mobileButtonSize.icon" class="animate-spin" fill="none" viewBox="0 0 24 24">
+									<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+									<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+								</svg>
+								<svg v-else :class="mobileButtonSize.icon" fill="currentColor" viewBox="0 0 20 20">
+									<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+								</svg>
+								<span>{{ isSubmitting ? __('Processing...') : __('Complete Payment') }}</span>
+							</button>
+						</div>
+					</div>
+					<!-- End Mobile Payment Section -->
+
+					<!-- Numeric Keypad (Desktop only) -->
+					<div :class="['hidden lg:block bg-white rounded-lg border border-gray-200', isCompactMode ? 'p-2' : 'p-3']">
+						<!-- Amount Display -->
+						<div :class="['bg-gray-100 rounded-lg', isCompactMode ? 'p-2 mb-2' : 'p-3 mb-3']">
+							<div dir="ltr" :class="['font-bold text-gray-900 text-center flex items-center justify-center gap-2', isCompactMode ? 'text-xl' : 'text-2xl']">
+								<span>{{ currencySymbol }}</span>
+								<span class="font-mono tracking-wider">{{ numpadDisplay || '0.00' }}</span>
+							</div>
+						</div>
+
+						<!-- Keypad Grid (4 columns) -->
+						<div :class="['grid grid-cols-4', isCompactMode ? 'gap-1' : 'gap-1.5']">
+							<!-- Row 1: 7, 8, 9, Backspace -->
+							<button
+								v-for="num in ['7', '8', '9']"
+								:key="num"
+								@click="numpadInput(num)"
+								:class="[dynamicNumpadSize.key, 'text-xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95']"
+							>
+								{{ num }}
+							</button>
+							<button
+								@click="numpadBackspace"
+								:class="[dynamicNumpadSize.key, 'text-lg font-semibold rounded-lg bg-red-50 border-2 border-red-200 hover:border-red-400 hover:bg-red-100 text-red-600 transition-all active:scale-95 flex items-center justify-center']"
+							>
+								<svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2M3 12l6.414 6.414a2 2 0 001.414.586H19a2 2 0 002-2V7a2 2 0 00-2-2h-8.172a2 2 0 00-1.414.586L3 12z"/>
+								</svg>
+							</button>
+
+							<!-- Row 2: 4, 5, 6, Clear -->
+							<button
+								v-for="num in ['4', '5', '6']"
+								:key="num"
+								@click="numpadInput(num)"
+								:class="[dynamicNumpadSize.key, 'text-xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95']"
+							>
+								{{ num }}
+							</button>
+							<button
+								@click="numpadClear"
+								:class="[dynamicNumpadSize.key, 'text-lg font-semibold rounded-lg bg-orange-50 border-2 border-orange-200 hover:border-orange-400 hover:bg-orange-100 text-orange-600 transition-all active:scale-95']"
+							>
+								C
+							</button>
+
+							<!-- Row 3: 1, 2, 3, Add (spans 2 rows) -->
+							<button
+								v-for="num in ['1', '2', '3']"
+								:key="num"
+								@click="numpadInput(num)"
+								:class="[dynamicNumpadSize.key, 'text-xl font-semibold rounded-lg bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95']"
+							>
+								{{ num }}
+							</button>
+							<button
+								@click="numpadAddPayment"
+								:disabled="!numpadValue || numpadValue <= 0 || !lastSelectedMethod"
+								:class="[
+									dynamicNumpadSize.addBtn, 'row-span-2 text-xl font-bold rounded-xl transition-all active:scale-95',
+									!numpadValue || numpadValue <= 0 || !lastSelectedMethod
+										? 'bg-gray-100 border-2 border-gray-200 text-gray-400 cursor-not-allowed'
+										: 'bg-blue-600 border-2 border-blue-600 hover:bg-blue-700 text-white'
+								]"
+							>
+								{{ __('Add') }}
+							</button>
+
+							<!-- Row 4: 00, 0, . -->
+							<button
+								@click="numpadInput('00')"
+								:class="[isCompactMode ? 'h-12' : 'h-16', 'text-2xl font-semibold rounded-xl bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95']"
+							>
+								00
+							</button>
+							<button
+								@click="numpadInput('0')"
+								:class="[isCompactMode ? 'h-12' : 'h-16', 'text-2xl font-semibold rounded-xl bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800 transition-all active:scale-95']"
+							>
+								0
+							</button>
+							<button
+								@click="numpadInput('.')"
+								:disabled="numpadDisplay.includes('.')"
+								:class="[
+									isCompactMode ? 'h-12' : 'h-16', 'text-2xl font-semibold rounded-xl transition-all active:scale-95',
+									numpadDisplay.includes('.')
+										? 'bg-gray-100 border-2 border-gray-200 text-gray-400 cursor-not-allowed'
+										: 'bg-gray-50 border-2 border-gray-200 hover:border-blue-400 hover:bg-blue-50 text-gray-800'
+								]"
+							>
+								.
+							</button>
+							</div>
+						</div>
+
+					<!-- Pay on Account warning banner (desktop) -->
+					<div v-if="payOnAccountWarningActive" class="hidden lg:flex bg-orange-50 border border-orange-300 rounded-lg px-4 py-2.5 items-start gap-3" :class="isCompactMode ? 'mt-2' : 'mt-3'">
+						<svg class="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+						</svg>
+						<p class="flex-1 text-sm font-medium text-orange-800">{{ __('Transaksi ini adalah piutang apakah kamu yakin untuk input piutang?') }}</p>
+						<button @click="_clearPayOnAccountWarning" class="text-orange-500 hover:text-orange-700 font-bold text-lg leading-none">✕</button>
+					</div>
+
+					<!-- Action Buttons - Below Keypad (Desktop only) -->
+					<div :class="['hidden lg:flex items-center gap-2', isCompactMode ? 'mt-2' : 'mt-4']">
+						<!-- Pay on Account Button (with warning + countdown) -->
+						<button
+							v-if="allowCreditSale"
+							@click="startPayOnAccountWarning"
+							:disabled="paymentEntries.length > 0 || isSubmitting || (payOnAccountWarningActive && payOnAccountCountdown > 0)"
+							:class="[
+								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
+								dynamicButtonHeight, 'text-sm font-semibold px-4 rounded-lg',
+								paymentEntries.length > 0 || isSubmitting || (payOnAccountWarningActive && payOnAccountCountdown > 0)
+									? 'bg-orange-300 text-white cursor-not-allowed'
+									: payOnAccountWarningActive
+										? 'bg-orange-700 text-white hover:bg-orange-800 active:bg-orange-900 ring-2 ring-orange-400 focus-visible:ring-2 focus-visible:ring-orange-400'
+										: 'bg-orange-500 text-white hover:bg-orange-600 active:bg-orange-700 focus-visible:ring-2 focus-visible:ring-orange-400'
+							]"
+						>
+							<svg v-if="isSubmitting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+							<svg v-else class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+							</svg>
+							<span>
+								<template v-if="isSubmitting">{{ __('Processing...') }}</template>
+								<template v-else-if="payOnAccountWarningActive && payOnAccountCountdown > 0">{{ __('Tunggu {0}s...', [payOnAccountCountdown]) }}</template>
+								<template v-else-if="payOnAccountWarningActive">{{ __('Konfirmasi Piutang') }}</template>
+								<template v-else>{{ __('Pay on Account') }}</template>
+							</span>
+						</button>
+
+						<!-- Complete/Partial Payment Button -->
+						<button
+							@click="completePayment"
+							:disabled="!canComplete || isSubmitting"
+							:class="[
+								'flex-1 inline-flex items-center justify-center gap-2 transition-colors focus:outline-none',
+								'py-2 text-sm font-semibold px-4 rounded-lg',
+								!canComplete || isSubmitting
+									? 'bg-blue-300 text-white cursor-not-allowed'
+									: 'bg-blue-600 text-white hover:bg-blue-700 active:bg-blue-800 focus-visible:ring-2 focus-visible:ring-blue-400'
+							]"
+						>
+							<svg v-if="isSubmitting" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+								<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+								<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+							</svg>
+							<svg v-else class="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+								<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+							</svg>
+							<span>{{ isSubmitting ? __('Processing...') : paymentButtonText }}</span>
+						</button>
+					</div>
+
+					<!-- Remarks Toggle + Field -->
+					<div class="mt-1.5">
+						<button
+							@click="showRemarks = !showRemarks"
+							:class="[
+								'w-full flex items-center justify-center gap-1.5 py-1.5 rounded-lg text-xs font-medium transition-colors border',
+								showRemarks || remarks
+									? 'bg-amber-50 border-amber-300 text-amber-700 hover:bg-amber-100'
+									: 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-gray-100 hover:text-gray-700'
+							]"
+						>
+							<svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"/>
+							</svg>
+							<span>{{ remarks ? __('Remarks ✓') : __('Add Remarks') }}</span>
+						</button>
+						<div v-if="showRemarks" class="mt-1.5">
+							<textarea
+								v-model="remarks"
+								:placeholder="__('Enter invoice remarks...')"
+								class="w-full px-3 py-2 text-xs border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-amber-400 focus:border-amber-400 resize-none"
+								rows="2"
+							></textarea>
+						</div>
+					</div>
+				</div>
+				<!-- End Right Column -->
+			</div>
+			<!-- End Two Column Layout -->
+		</template>
+	</Dialog>
+	<DiscountComplimentDialog
+		v-model="showDiscountDialog"
+		:subtotal="subtotal"
+	/>
+</template>
+
+<script setup>
+import DiscountComplimentDialog from "@/components/sale/DiscountComplimentDialog.vue"
+import { usePOSSettingsStore } from "@/stores/posSettings"
+import {
+	DEFAULT_CURRENCY,
+	formatCurrency as formatCurrencyUtil,
+	getCurrencySymbol,
+	roundCurrency,
+} from "@/utils/currency"
+import { getPaymentIcon } from "@/utils/payment"
+import { offlineWorker } from "@/utils/offline/workerClient"
+import { logger } from "@/utils/logger"
+import { Dialog, createResource } from "frappe-ui"
+import { call } from "@/utils/apiWrapper"
+import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue"
+import { useToast } from "@/composables/useToast"
+import { useLongPress } from "@/composables/useLongPress"
+import { usePaymentNumpad } from "@/composables/usePaymentNumpad"
+import { useResponsivePayment } from "@/composables/useResponsivePayment"
+import { useQuickAmounts } from "@/composables/useQuickAmounts"
+
+const log = logger.create("PaymentDialog")
+const settingsStore = usePOSSettingsStore()
+const { showWarning, showInfo } = useToast()
+
+const props = defineProps({
+	modelValue: Boolean,
+	grandTotal: {
+		type: Number,
+		default: 0,
+	},
+	subtotal: {
+		type: Number,
+		default: 0,
+	},
+	posProfile: String,
+	currency: {
+		type: String,
+		default: DEFAULT_CURRENCY,
+	},
+	isOffline: {
+		type: Boolean,
+		default: false,
+	},
+	allowPartialPayment: {
+		type: Boolean,
+		default: false,
+	},
+	allowCreditSale: {
+		type: Boolean,
+		default: false,
+	},
+	allowCustomerCreditPayment: {
+		type: Boolean,
+		default: false,
+	},
+	customer: {
+		type: [String, Object],
+		default: null,
+	},
+	items: {
+		type: Array,
+		default: () => [],
+	},
+	taxAmount: {
+		type: Number,
+		default: 0,
+	},
+	discountAmount: {
+		type: Number,
+		default: 0,
+	},
+	company: {
+		type: String,
+		default: "",
+	},
+	additionalDiscount: {
+		type: Number,
+		default: 0,
+	},
+	targetDoctype: {
+		type: String,
+		default: "Sales Invoice",
+	},
+	isSubmitting: {
+		type: Boolean,
+		default: false,
+	},
+	writeOffLimit: {
+		type: Number,
+		default: 0,
+	},
+	allowWriteOff: {
+		type: Boolean,
+		default: false,
+	},
+	roundingAdjustment: {
+		type: Number,
+		default: 0,
+	},
+})
+
+const emit = defineEmits([
+	"update:modelValue",
+	"payment-completed",
+	"update-additional-discount",
+	"request-discount-auth",
+])
+
+const show = computed({
+	get: () => props.modelValue,
+	set: (val) => emit("update:modelValue", val),
+})
+
+const paymentMethods = ref([])
+const loadingPaymentMethods = ref(false)
+const lastSelectedMethod = ref(null)
+const showDiscountDialog = ref(false)
+function handleDiscountButtonClick() {
+	if (!settingsStore.discountPasswords.length) {
+		showDiscountDialog.value = true
+	} else {
+		emit("request-discount-auth")
+	}
+}
+
+defineExpose({
+	openDiscountDialog() {
+		showDiscountDialog.value = true
+	},
+})
+const customAmount = ref("")
+const paymentEntries = ref([])
+const customerCredit = ref([])
+const customerBalance = ref({
+	total_outstanding: 0,
+	total_credit: 0,
+	net_balance: 0,
+})
+const loadingCredit = ref(false)
+
+// Loyalty state
+const loyaltyPointInfo = ref({ loyalty_points: 0 })
+const loadingLoyalty = ref(false)
+const pointsToRedeem = ref(0)
+const isPointsRedemptionActive = ref(false)
+const showLoyaltyConfirm = ref(false)
+
+const maxRedeemablePoints = computed(() => {
+	const available = loyaltyPointInfo.value?.loyalty_points || 0
+	const convFactor = loyaltyPointInfo.value?.conversion_factor || 1
+	return Math.min(available, Math.floor(props.grandTotal / convFactor))
+})
+
+function activateLoyaltyRedemption() {
+	pointsToRedeem.value = maxRedeemablePoints.value
+	isPointsRedemptionActive.value = true
+	showLoyaltyConfirm.value = false
+}
+
+// Pay on Account warning state
+const payOnAccountWarningActive = ref(false)
+const payOnAccountCountdown = ref(0)
+let _payOnAccountTimer = null
+
+function startPayOnAccountWarning() {
+	if (payOnAccountWarningActive.value && payOnAccountCountdown.value === 0) {
+		// Warning shown and countdown done — confirm
+		_clearPayOnAccountWarning()
+		addCreditAccountPayment()
+		return
+	}
+	if (payOnAccountWarningActive.value) return // already counting down
+
+	payOnAccountWarningActive.value = true
+	payOnAccountCountdown.value = 3
+
+	_payOnAccountTimer = setInterval(() => {
+		payOnAccountCountdown.value--
+		if (payOnAccountCountdown.value <= 0) {
+			clearInterval(_payOnAccountTimer)
+			_payOnAccountTimer = null
+		}
+	}, 1000)
+}
+
+function _clearPayOnAccountWarning() {
+	payOnAccountWarningActive.value = false
+	payOnAccountCountdown.value = 0
+	if (_payOnAccountTimer) {
+		clearInterval(_payOnAccountTimer)
+		_payOnAccountTimer = null
+	}
+}
+
+const redeemedLoyaltyAmount = computed(() => {
+	if (!isPointsRedemptionActive.value || !loyaltyPointInfo.value) return 0
+	return pointsToRedeem.value * (loyaltyPointInfo.value.conversion_factor || 1)
+})
+
+// Delivery date for Sales Orders
+const deliveryDate = ref("")
+const today = new Date().toISOString().split("T")[0]
+const isSalesOrder = computed(() => props.targetDoctype === "Sales Order")
+
+// Remarks state
+const remarks = ref("")
+const showRemarks = ref(false)
+
+// Column refs for height matching
+const rightColumnRef = ref(null)
+const rightColumnMinHeight = ref("auto")
+
+// Use responsive payment composable for viewport tracking and dynamic sizing
+const {
+	dynamicDialogSize,
+	isMobileView,
+	dialogContentMaxHeight,
+	dynamicLeftColumnHeight,
+	isCompactMode,
+	isSmallMobile,
+	dynamicGap,
+	dynamicTextSize,
+	dynamicButtonHeight,
+	mobileButtonSize,
+	dynamicNumpadSize,
+} = useResponsivePayment()
+
+// Calculate and sync column heights when dialog opens
+function syncColumnHeights() {
+	nextTick(() => {
+		if (rightColumnRef.value) {
+			const rightHeight = rightColumnRef.value.offsetHeight
+			// Preserve initial height to prevent shrinking when Quick Amounts is hidden
+			rightColumnMinHeight.value = `${rightHeight}px`
+		}
+	})
+}
+
+// Watch for dialog open to sync heights
+watch(
+	() => props.modelValue,
+	(isOpen) => {
+		if (isOpen) {
+			// Reset min height when dialog opens so we can measure fresh
+			rightColumnMinHeight.value = "auto"
+			// Small delay to ensure DOM is rendered
+			setTimeout(syncColumnHeights, 100)
+		}
+	},
+)
+
+// Handle Enter key from numpad keyboard input
+function handleNumpadEnter(value) {
+	if (value > 0 && lastSelectedMethod.value) {
+		numpadAddPayment()
+	} else if (
+		remainingAmount.value === 0 &&
+		(totalPaid.value > 0 || roundCurrency(props.grandTotal) <= 0) &&
+		canComplete.value
+	) {
+		// If fully paid and can complete, trigger complete payment
+		completePayment()
+	}
+}
+
+// Use numpad composable for keypad input handling with keyboard support
+const {
+	numpadDisplay,
+	numpadValue,
+	numpadInput,
+	numpadBackspace,
+	numpadClear,
+	setNumpadValue,
+} = usePaymentNumpad({
+	isEnabled: computed(() => props.modelValue), // Only enabled when dialog is open
+	onEnter: handleNumpadEnter,
+})
+
+// Mobile custom amount state
+const mobileCustomAmount = ref("")
+
+function addMobileCustomPayment() {
+	const amount = Number.parseFloat(mobileCustomAmount.value)
+	if (amount > 0 && lastSelectedMethod.value) {
+		addCustomPayment(lastSelectedMethod.value, amount)
+		mobileCustomAmount.value = ""
+	}
+}
+
+function numpadAddPayment() {
+	if (numpadValue.value > 0 && lastSelectedMethod.value) {
+		addCustomPayment(lastSelectedMethod.value, numpadValue.value)
+		numpadClear()
+	}
+}
+
+// Additional discount state
+const localAdditionalDiscount = ref(0)
+// Initialize discount type from settings (default to percentage if enabled, otherwise amount)
+const additionalDiscountType = ref(
+	settingsStore.usePercentageDiscount ? "percentage" : "amount",
+)
+
+const paymentMethodsResource = createResource({
+	url: "pos_next.api.pos_profile.get_payment_methods",
+	makeParams() {
+		return {
+			pos_profile: props.posProfile,
+		}
+	},
+	auto: false,
+	onSuccess(data) {
+		paymentMethods.value = data?.message || data || []
+		// Set first method as last selected for quick amounts
+		if (paymentMethods.value.length > 0) {
+			const defaultMethod = paymentMethods.value.find((m) => m.default)
+			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
+		}
+	},
+})
+
+const customerCreditResource = createResource({
+	url: "pos_next.api.credit_sales.get_available_credit",
+	makeParams() {
+		const customerName = props.customer?.name || props.customer
+		log.debug("[PaymentDialog] Fetching credit for customer:", customerName)
+		return {
+			customer: customerName,
+			company: props.company,
+			pos_profile: props.posProfile,
+		}
+	},
+	auto: false,
+	onSuccess(data) {
+		log.debug("[PaymentDialog] Customer credit loaded:", data)
+		customerCredit.value = data || []
+		// Note: loadingCredit is managed by customerBalanceResource since it provides the net_balance for UI
+		log.debug(
+			"[PaymentDialog] Total available credit:",
+			totalAvailableCredit.value,
+		)
+	},
+	onError(error) {
+		log.error("[PaymentDialog] Error loading customer credit:", error)
+		customerCredit.value = []
+		// Note: loadingCredit is managed by customerBalanceResource since it provides the net_balance for UI
+	},
+})
+
+const customerBalanceResource = createResource({
+	url: "pos_next.api.credit_sales.get_customer_balance",
+	makeParams() {
+		const customerName = props.customer?.name || props.customer
+		log.debug("[PaymentDialog] Fetching balance for customer:", customerName)
+		return {
+			customer: customerName,
+			company: props.company,
+		}
+	},
+	auto: false,
+	onSuccess(data) {
+		log.debug("[PaymentDialog] Customer balance loaded:", data)
+		customerBalance.value = data || {
+			total_outstanding: 0,
+			total_credit: 0,
+			net_balance: 0,
+		}
+		log.debug("[PaymentDialog] Net balance:", customerBalance.value.net_balance)
+		loadingCredit.value = false
+	},
+	onError(error) {
+		log.error("[PaymentDialog] Error loading customer balance:", error)
+		customerBalance.value = {
+			total_outstanding: 0,
+			total_credit: 0,
+			net_balance: 0,
+		}
+		loadingCredit.value = false
+	},
+})
+// Loyalty Points resource
+const loyaltyPointsResource = createResource({
+	url: "erpnext.accounts.doctype.loyalty_program.loyalty_program.get_loyalty_program_details_with_points",
+	makeParams() {
+		const customerName = props.customer?.name || props.customer
+		const loyaltyProgram = props.customer?.loyalty_program || null
+		return {
+			customer: customerName,
+			loyalty_program: loyaltyProgram,
+			silent: true,
+		}
+	},
+	auto: false,
+	onSuccess(data) {
+		const result = data?.message || data || null
+		log.debug("[PaymentDialog] Loyalty info loaded:", result)
+		loyaltyPointInfo.value = result || { loyalty_points: 0 }
+		loadingLoyalty.value = false
+	},
+	onError(error) {
+		log.error("[PaymentDialog] Error loading loyalty points:", error)
+		loyaltyPointInfo.value = { loyalty_points: 0 }
+		loadingLoyalty.value = false
+	},
+})
+
+// Check if a payment method is a cash payment (allows overpayment/change)
+function isCashPaymentMethod(method) {
+	if (!method) return false
+	// Check by account_type first (most reliable - from linked Account)
+	const accountType = (method.account_type || "").toLowerCase()
+	if (accountType === "cash") return true
+	// Fallback to Mode of Payment type
+	const type = (method.type || "").toLowerCase()
+	if (type === "cash") return true
+	// Check by mode_of_payment name as fallback
+	const name = (method.mode_of_payment || "").toLowerCase()
+	return name.includes("cash") || name.includes("نقد") || name.includes("نقدي")
+}
+
+// Filter payment methods
+const filteredPaymentMethods = computed(() => paymentMethods.value)
+
+// ===========================================
+// Payment Method Categories (Cash / Debit / Transfer)
+// Groups the (potentially many) POS Payment Methods into 3 category buttons
+// based on the `custom_payment_type` field tagged on each POS Payment Method.
+// ===========================================
+function methodsOfType(typeName) {
+	return paymentMethods.value.filter(
+		(m) => (m.custom_payment_type || "").toLowerCase() === typeName,
+	)
+}
+
+// Cash: there is only ever one per POS Profile - select it directly, no dropdown
+const cashPaymentMethod = computed(() => methodsOfType("cash")[0] || null)
+// Debit / Transfer: may have several methods - shown via dropdown
+const debitPaymentMethods = computed(() => methodsOfType("debit"))
+const transferPaymentMethods = computed(() => methodsOfType("transfer"))
+
+function isMethodSelected(method) {
+	return (
+		!!method &&
+		!!lastSelectedMethod.value &&
+		lastSelectedMethod.value.mode_of_payment === method.mode_of_payment
+	)
+}
+
+// Currently active method within a category (used to show its name on the button)
+const selectedDebitMethod = computed(() => {
+	const m = lastSelectedMethod.value
+	if (!m) return null
+	return debitPaymentMethods.value.find((d) => d.mode_of_payment === m.mode_of_payment) || null
+})
+const selectedTransferMethod = computed(() => {
+	const m = lastSelectedMethod.value
+	if (!m) return null
+	return transferPaymentMethods.value.find((t) => t.mode_of_payment === m.mode_of_payment) || null
+})
+
+const debitDropdownOpen = ref(false)
+const transferDropdownOpen = ref(false)
+const debitDropdownRef = ref(null)
+const transferDropdownRef = ref(null)
+
+function selectCashMethod() {
+	if (cashPaymentMethod.value) {
+		selectPaymentMethod(cashPaymentMethod.value)
+	}
+}
+
+function toggleDebitDropdown() {
+	transferDropdownOpen.value = false
+	debitDropdownOpen.value = !debitDropdownOpen.value
+}
+
+function toggleTransferDropdown() {
+	debitDropdownOpen.value = false
+	transferDropdownOpen.value = !transferDropdownOpen.value
+}
+
+function selectCategoryMethod(method) {
+	selectPaymentMethod(method)
+	debitDropdownOpen.value = false
+	transferDropdownOpen.value = false
+}
+
+function handleCategoryDropdownOutsideClick(event) {
+	if (
+		debitDropdownOpen.value &&
+		debitDropdownRef.value &&
+		!debitDropdownRef.value.contains(event.target)
+	) {
+		debitDropdownOpen.value = false
+	}
+	if (
+		transferDropdownOpen.value &&
+		transferDropdownRef.value &&
+		!transferDropdownRef.value.contains(event.target)
+	) {
+		transferDropdownOpen.value = false
+	}
+}
+
+onMounted(() => {
+	document.addEventListener("pointerdown", handleCategoryDropdownOutsideClick)
+})
+
+onBeforeUnmount(() => {
+	document.removeEventListener("pointerdown", handleCategoryDropdownOutsideClick)
+})
+
+// Sales Persons state
+const salesPersons = ref([])
+const selectedSalesPersons = ref([])
+const salesPersonSearch = ref("")
+const loadingSalesPersons = ref(false)
+const salesPersonDropdownOpen = ref(false)
+const salesPersonDropdownRef = ref(null)
+
+const salesPersonsResource = createResource({
+	url: "pos_next.api.pos_profile.get_sales_persons",
+	makeParams() {
+		return {
+			pos_profile: props.posProfile,
+		}
+	},
+	auto: false,
+	onSuccess(data) {
+		log.debug("[PaymentDialog] Sales persons loaded:", data)
+		salesPersons.value = data?.message || data || []
+		loadingSalesPersons.value = false
+	},
+	onError(error) {
+		log.error("[PaymentDialog] Error loading sales persons:", error)
+		salesPersons.value = []
+		loadingSalesPersons.value = false
+	},
+})
+
+// Computed: Available sales persons (exclude already selected, filter by search)
+const availableSalesPersons = computed(() => {
+	const selectedIds = selectedSalesPersons.value.map((p) => p.sales_person)
+	const searchLower = (salesPersonSearch.value || "").toLowerCase()
+
+	return salesPersons.value
+		.filter((person) => {
+			// Exclude already selected
+			if (selectedIds.includes(person.name)) {
+				return false
+			}
+			// Filter by search term if provided
+			if (searchLower) {
+				const name = (
+					person.sales_person_name ||
+					person.name ||
+					""
+				).toLowerCase()
+				return name.includes(searchLower)
+			}
+			return true
+		})
+		.slice(0, 10) // Limit to 10 results for performance
+})
+
+// Computed: Total allocation percentage
+const totalSalesAllocation = computed(() => {
+	return selectedSalesPersons.value.reduce(
+		(sum, p) => sum + (p.allocated_percentage || 0),
+		0,
+	)
+})
+
+// Computed: Validation - sales person is required when enabled
+const isSalesPersonValid = computed(() => {
+	// If sales persons feature is disabled, always valid
+	if (!settingsStore.enableSalesPersons) {
+		return true
+	}
+	// At least one sales person must be selected
+	return selectedSalesPersons.value.length > 0
+})
+
+// Helper functions for sales persons
+function addSalesPerson(person) {
+	// For Single mode, replace the existing selection with 100%
+	if (settingsStore.isSingleSalesPerson) {
+		selectedSalesPersons.value = [
+			{
+				sales_person: person.name,
+				sales_person_name: person.sales_person_name || person.name,
+				allocated_percentage: 100,
+				commission_rate: person.commission_rate,
+			},
+		]
+		// Close dropdown after single selection
+		salesPersonSearch.value = ""
+		salesPersonDropdownOpen.value = false
+	} else {
+		// For Multiple mode, add to the list and redistribute evenly
+		selectedSalesPersons.value.push({
+			sales_person: person.name,
+			sales_person_name: person.sales_person_name || person.name,
+			allocated_percentage: 0, // Will be recalculated
+			commission_rate: person.commission_rate,
+		})
+		// Redistribute commission evenly among all selected
+		redistributeCommission()
+		// Keep dropdown open for multiple selection, just clear search
+		salesPersonSearch.value = ""
+		// Keep dropdown open so user can continue selecting
+	}
+}
+
+function removeSalesPerson(personName) {
+	const index = selectedSalesPersons.value.findIndex(
+		(p) => p.sales_person === personName,
+	)
+	if (index > -1) {
+		selectedSalesPersons.value.splice(index, 1)
+		// Redistribute commission among remaining
+		if (selectedSalesPersons.value.length > 0) {
+			redistributeCommission()
+		}
+	}
+}
+
+function clearSalesPersons() {
+	selectedSalesPersons.value = []
+	salesPersonSearch.value = ""
+}
+
+// Redistribute commission evenly among all selected sales persons
+function redistributeCommission() {
+	const count = selectedSalesPersons.value.length
+	if (count === 0) return
+
+	const evenShare = 100 / count
+	selectedSalesPersons.value.forEach((person) => {
+		person.allocated_percentage = evenShare
+	})
+}
+
+// Handle blur event for dropdown
+function handleSalesPersonBlur() {
+	// Delay closing to allow click events on dropdown items
+	setTimeout(() => {
+		salesPersonDropdownOpen.value = false
+	}, 150)
+}
+
+// Load payment methods - from cache if offline, from server if online
+async function loadPaymentMethods() {
+	// Guard: Don't load if posProfile is not set or already loading
+	if (!props.posProfile) {
+		log.warn(
+			"PaymentDialog: Cannot load payment methods - posProfile is not set",
+		)
+		return
+	}
+
+	// Skip if already loading or already loaded for this profile
+	if (loadingPaymentMethods.value) {
+		return
+	}
+
+	loadingPaymentMethods.value = true
+
+	try {
+		if (props.isOffline) {
+			// Load from cache when offline using worker
+			const cached = await offlineWorker.getCachedPaymentMethods(
+				props.posProfile,
+			)
+			if (cached && cached.length > 0) {
+				paymentMethods.value = cached
+				if (paymentMethods.value.length > 0) {
+					const defaultMethod = paymentMethods.value.find((m) => m.default)
+					lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
+				}
+			} else {
+				log.warn(
+					"PaymentDialog: Offline cache empty, trying to fetch from server...",
+				)
+				await paymentMethodsResource.fetch()
+			}
+		} else {
+			// Load from server when online
+			await paymentMethodsResource.fetch()
+		}
+	} catch (error) {
+		log.error("Error loading payment methods:", error)
+	} finally {
+		loadingPaymentMethods.value = false
+	}
+}
+
+// Currency symbol for display
+const currencySymbol = computed(() => getCurrencySymbol(props.currency))
+
+const totalPaid = computed(() => {
+	const sum = paymentEntries.value.reduce(
+		(sum, entry) => sum + (entry.amount || 0),
+		0,
+	)
+	return roundCurrency(sum)
+})
+
+// Customer credit payment is enabled if either:
+// - allowCreditSale is enabled (allows going into debt AND using credit)
+// - allowCustomerCreditPayment is enabled (only allows using positive credit)
+const customerCreditEnabled = computed(() => {
+	return props.allowCreditSale || props.allowCustomerCreditPayment
+})
+
+const totalAvailableCredit = computed(() => {
+	// Use net_balance: negative means customer has credit, positive means they owe
+	// Return negative of net_balance so positive = credit available, negative = outstanding
+	return roundCurrency(-customerBalance.value.net_balance)
+})
+
+// Remaining credit after deducting what's already been applied as payment
+const remainingAvailableCredit = computed(() => {
+	const usedCredit = getMethodTotal("Customer Credit")
+	const remaining = totalAvailableCredit.value - usedCredit
+	return remaining > 0 ? roundCurrency(remaining) : 0
+})
+
+// Calculate the actual discount amount based on type (percentage or fixed amount)
+const calculatedAdditionalDiscount = computed(() => {
+	if (additionalDiscountType.value === "percentage") {
+		return roundCurrency((props.subtotal * localAdditionalDiscount.value) / 100)
+	}
+	return roundCurrency(localAdditionalDiscount.value)
+})
+
+const remainingAmount = computed(() => {
+	const remaining =
+		roundCurrency(props.grandTotal) -
+		totalPaid.value -
+		redeemedLoyaltyAmount.value
+	return remaining > 0 ? roundCurrency(remaining) : 0
+})
+
+const changeAmount = computed(() => {
+	const change =
+		totalPaid.value +
+		redeemedLoyaltyAmount.value -
+		roundCurrency(props.grandTotal)
+	return change > 0 ? roundCurrency(change) : 0
+})
+
+// ===========================================
+// Write-Off Logic
+// When enabled, allows small remaining amounts to be written off
+// ===========================================
+
+// Check if write-off is possible for the current remaining amount
+const canWriteOff = computed(() => {
+	// Write-off is only possible if:
+	// 1. Write-off is allowed (setting enabled and limit > 0)
+	// 2. There is a remaining amount to write off
+	// 3. Remaining amount is within the write-off limit
+	// 4. There is at least one payment entry
+	return (
+		props.allowWriteOff &&
+		props.writeOffLimit > 0 &&
+		remainingAmount.value > 0 &&
+		remainingAmount.value <= props.writeOffLimit &&
+		paymentEntries.value.length > 0
+	)
+})
+
+// State to track if user wants to write off
+const applyWriteOff = ref(false)
+
+// Slide track ref for write-off slider
+const slideTrack = ref(null)
+
+// Slide position (0-100%)
+const slidePosition = ref(0)
+const isDragging = ref(false)
+
+// Watch applyWriteOff to sync with slidePosition
+watch(applyWriteOff, (newVal) => {
+	if (!isDragging.value) {
+		slidePosition.value = newVal ? 100 : 0
+	}
+})
+
+// Smooth slide to activate write-off
+const startSlide = (e) => {
+	e.preventDefault()
+	const track = slideTrack.value
+	if (!track) return
+
+	isDragging.value = true
+	const rect = track.getBoundingClientRect()
+	const trackWidth = rect.width
+	const handleWidth = 48 // w-12 = 3rem = 48px
+
+	const getX = (event) => {
+		if (event.touches && event.touches.length > 0) {
+			return event.touches[0].clientX - rect.left
+		}
+		return event.clientX - rect.left
+	}
+
+	const startX = getX(e)
+	const startPosition = slidePosition.value
+
+	const onMove = (event) => {
+		event.preventDefault()
+		const currentX = event.touches
+			? event.touches[0].clientX - rect.left
+			: event.clientX - rect.left
+		const deltaX = currentX - startX
+		const deltaPercent = (deltaX / (trackWidth - handleWidth)) * 100
+
+		let newPosition = startPosition + deltaPercent
+		newPosition = Math.max(0, Math.min(100, newPosition))
+		slidePosition.value = newPosition
+	}
+
+	const onEnd = () => {
+		isDragging.value = false
+
+		// Snap to activated or deactivated based on threshold
+		if (slidePosition.value > 40) {
+			slidePosition.value = 100
+			applyWriteOff.value = true
+		} else {
+			slidePosition.value = 0
+			applyWriteOff.value = false
+		}
+
+		document.removeEventListener("mousemove", onMove)
+		document.removeEventListener("mouseup", onEnd)
+		document.removeEventListener("touchmove", onMove)
+		document.removeEventListener("touchend", onEnd)
+	}
+
+	document.addEventListener("mousemove", onMove)
+	document.addEventListener("mouseup", onEnd)
+	document.addEventListener("touchmove", onMove, { passive: false })
+	document.addEventListener("touchend", onEnd)
+}
+
+// The amount to be written off (0 if not applying write-off)
+const writeOffAmount = computed(() => {
+	if (canWriteOff.value && applyWriteOff.value) {
+		return remainingAmount.value
+	}
+	return 0
+})
+
+// Effective remaining amount after write-off
+const effectiveRemainingAmount = computed(() => {
+	if (applyWriteOff.value && canWriteOff.value) {
+		return 0
+	}
+	return remainingAmount.value
+})
+
+// ===========================================
+// Exact Amount Validation Logic
+// When useExactAmount is enabled:
+// - Cash only: allows overpayment (change)
+// - Non-cash only: must be exact amount
+// - Mixed (cash + non-cash): must be exact total
+// ===========================================
+
+// Check if exact amount mode is active
+// Note: Backend validation in POS Settings already prevents enabling use_exact_amount
+// together with allow_credit_sale or allow_partial_payment
+const isExactAmountModeActive = computed(() => {
+	return settingsStore.useExactAmount
+})
+
+// Check if payment entries contain any cash payments
+const hasCashPayment = computed(() => {
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment,
+		)
+		return isCashPaymentMethod(method)
+	})
+})
+
+// Check if payment entries contain any non-cash payments
+const hasNonCashPayment = computed(() => {
+	return paymentEntries.value.some((entry) => {
+		const method = paymentMethods.value.find(
+			(m) => m.mode_of_payment === entry.mode_of_payment,
+		)
+		return method && !isCashPaymentMethod(method) && !entry.is_customer_credit
+	})
+})
+
+// Check if current payment scenario allows overpayment (change)
+const allowsOverpayment = computed(() => {
+	// If exact amount mode is not active, allow overpayment
+	if (!isExactAmountModeActive.value) return true
+
+	// If no payments yet, default to allowing overpayment
+	if (paymentEntries.value.length === 0) return true
+
+	// Cash only: allows overpayment
+	if (hasCashPayment.value && !hasNonCashPayment.value) return true
+
+	// Non-cash or mixed: no overpayment allowed
+	return false
+})
+
+// Check if current payment is valid according to exact amount rules
+const isExactAmountValid = computed(() => {
+	if (!isExactAmountModeActive.value) return true
+
+	// If no payments, it's valid (nothing to validate yet)
+	if (paymentEntries.value.length === 0) return true
+
+	// Cash only: always valid (allows overpayment)
+	if (hasCashPayment.value && !hasNonCashPayment.value) return true
+
+	// Non-cash or mixed: total paid must not exceed grand total
+	return totalPaid.value <= roundCurrency(props.grandTotal)
+})
+
+const canComplete = computed(() => {
+	// Check sales person validation first (mandatory when enabled)
+	if (!isSalesPersonValid.value) {
+		return false
+	}
+
+	// Check exact amount validation
+	if (!isExactAmountValid.value) {
+		return false
+	}
+
+	// If grand total is 0 (fully covered by loyalty points or discount), allow completing
+	if (roundCurrency(props.grandTotal) <= 0) {
+		return true
+	}
+
+	// If loyalty points cover the full remaining amount, allow completing without payment entries
+	if (redeemedLoyaltyAmount.value > 0 && remainingAmount.value === 0) {
+		return true
+	}
+
+	// If partial payment is allowed, can complete with any amount > 0
+	if (props.allowPartialPayment) {
+		return totalPaid.value > 0 && paymentEntries.value.length > 0
+	}
+
+	// If write-off is applied and covers the remaining amount, can complete
+	if (applyWriteOff.value && canWriteOff.value) {
+		return paymentEntries.value.length > 0
+	}
+
+	// Otherwise require full payment
+	return remainingAmount.value === 0 && paymentEntries.value.length > 0
+})
+
+const paymentButtonText = computed(() => {
+	// Show "Complete Payment" if fully paid or write-off covers remaining
+	if (
+		remainingAmount.value === 0 ||
+		(applyWriteOff.value && canWriteOff.value)
+	) {
+		return __("Complete Payment")
+	}
+	if (props.allowPartialPayment && totalPaid.value > 0) {
+		return __("Partial Payment")
+	}
+	return __("Complete Payment")
+})
+
+// Use quick amounts composable for smart amount suggestions
+// Cash methods show rounded/ceil amounts (physical denominations),
+// non-cash methods show the exact fractional amount
+const isLastMethodCash = computed(() => {
+	return (
+		!lastSelectedMethod.value || isCashPaymentMethod(lastSelectedMethod.value)
+	)
+})
+const { quickAmounts } = useQuickAmounts(remainingAmount, isLastMethodCash)
+
+// Whether a quick amount button should be disabled in exact-amount mode
+// Non-cash methods can only pay the exact remaining — no rounding allowed
+function isQuickAmountDisabled(amount) {
+	return (
+		isExactAmountModeActive.value &&
+		!isCashPaymentMethod(lastSelectedMethod.value) &&
+		amount !== roundCurrency(remainingAmount.value)
+	)
+}
+
+// Preload payment methods when posProfile is set (before dialog opens)
+watch(
+	() => props.posProfile,
+	(newProfile) => {
+		if (newProfile) {
+			log.debug(
+				"[PaymentDialog] Preloading payment methods for profile:",
+				newProfile,
+			)
+			loadPaymentMethods()
+			// Also preload sales persons if enabled
+			if (settingsStore.enableSalesPersons && salesPersons.value.length === 0) {
+				loadingSalesPersons.value = true
+				salesPersonsResource.fetch()
+			}
+		}
+	},
+	{ immediate: true }, // Load immediately if posProfile is already set
+)
+
+// Pre-fetch customer balance when customer changes (before dialog opens)
+// This ensures data is available immediately when dialog opens
+watch(
+	() => [
+		props.customer,
+		props.company,
+		props.allowCreditSale,
+		props.allowCustomerCreditPayment,
+	],
+	([customer, company, allowCreditSale, allowCustomerCreditPayment]) => {
+		const creditEnabled = allowCreditSale || allowCustomerCreditPayment
+		if (creditEnabled && customer && company) {
+			log.debug("[PaymentDialog] Pre-fetching customer balance for:", customer)
+			customerBalanceResource.fetch()
+			customerCreditResource.fetch()
+		}
+	},
+	{ immediate: true },
+)
+
+watch(show, (newVal) => {
+	if (newVal) {
+		// Reset state when dialog opens
+		paymentEntries.value = []
+		customAmount.value = ""
+		numpadClear()
+		mobileCustomAmount.value = ""
+		lastSelectedMethod.value = null
+		customerCredit.value = []
+		// Note: Don't reset customerBalance here - it's pre-fetched when customer changes
+		selectedSalesPersons.value = []
+		salesPersonSearch.value = ""
+		applyWriteOff.value = false // Reset write-off state
+		// Reset loyalty state
+		isPointsRedemptionActive.value = false
+		pointsToRedeem.value = 0
+		showLoyaltyConfirm.value = false
+		_clearPayOnAccountWarning()
+
+		// If payment methods failed to preload (e.g. network hiccup), retry now
+		if (paymentMethods.value.length === 0 && !loadingPaymentMethods.value) {
+			loadPaymentMethods()
+		} else if (paymentMethods.value.length > 0 && !lastSelectedMethod.value) {
+			const defaultMethod = paymentMethods.value.find((m) => m.default)
+			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
+		}
+
+		// Set default delivery date to today for Sales Orders
+		deliveryDate.value = isSalesOrder.value ? today : ""
+		// Reset remarks
+		remarks.value = ""
+		showRemarks.value = false
+
+		// Debug logging
+		log.debug("[PaymentDialog] Dialog opened with props:", {
+			allowCreditSale: props.allowCreditSale,
+			allowCustomerCreditPayment: props.allowCustomerCreditPayment,
+			allowWriteOff: props.allowWriteOff,
+			writeOffLimit: props.writeOffLimit,
+			customer: props.customer,
+			company: props.company,
+			posProfile: props.posProfile,
+		})
+
+		// Fetch loyalty points when dialog opens
+		if (props.customer && props.company) {
+			if (props.isOffline) {
+				log.debug("[PaymentDialog] Using offline cached loyalty points")
+				const customerLp = props.customer?.loyalty_program || null
+				const cfFromMap = customerLp
+					? (settingsStore.loyaltyProgramsCfMap[customerLp] || 0)
+					: 0
+				loyaltyPointInfo.value = {
+					loyalty_points: props.customer.loyalty_points || 0,
+					loyalty_program: customerLp,
+					conversion_factor:
+						cfFromMap ||
+						settingsStore.loyaltyConversionFactor,
+				}
+			} else {
+				loadingLoyalty.value = true
+				loyaltyPointsResource.fetch()
+			}
+		}
+
+		// Set default payment method if already loaded
+		if (paymentMethods.value.length > 0 && !lastSelectedMethod.value) {
+			const defaultMethod = paymentMethods.value.find((m) => m.default)
+			lastSelectedMethod.value = defaultMethod || paymentMethods.value[0]
+		}
+	}
+})
+
+// ===========================================
+// Keyboard Shortcuts for Payment Dialog
+// I = exact amount, O = round 1, P = round 2
+// ===========================================
+
+let paymentKeyHandler = null
+
+watch(show, (isOpen) => {
+	if (isOpen) {
+		paymentKeyHandler = (e) => {
+			// Skip if typing in input
+			const tag = e.target?.tagName?.toLowerCase()
+			if (tag === "input" || tag === "textarea") return
+
+			const key = e.key
+
+			// Delete = clear all payments (always available)
+			if (key === "Delete") {
+				e.preventDefault()
+				clearAll()
+				return
+			}
+
+			// Quick amount shortcuts only when a method is selected and remaining > 0
+			if (!lastSelectedMethod.value || remainingAmount.value <= 0) return
+
+			let amountIndex = -1
+			const lk = key.toLowerCase()
+
+			if (lk === "i")
+				amountIndex = 0 // exact amount
+			else if (lk === "o")
+				amountIndex = 1 // round 1
+			else if (lk === "p") amountIndex = 2 // round 2
+
+			if (amountIndex >= 0 && quickAmounts.value[amountIndex] !== undefined) {
+				e.preventDefault()
+				const amount = quickAmounts.value[amountIndex]
+				if (!isQuickAmountDisabled(amount)) {
+					addCustomPayment(lastSelectedMethod.value, amount)
+				}
+			}
+		}
+		window.addEventListener("keydown", paymentKeyHandler)
+	} else {
+		if (paymentKeyHandler) {
+			window.removeEventListener("keydown", paymentKeyHandler)
+			paymentKeyHandler = null
+		}
+	}
+})
+
+// ===========================================
+// Payment Method Press Handler (Long Press Support)
+// Uses composable for clean, reusable press handling
+// ===========================================
+
+// Select payment method (tap action)
+function selectPaymentMethod(method) {
+	lastSelectedMethod.value = method
+	log.debug("[PaymentDialog] Selected payment method:", method.mode_of_payment)
+}
+
+// Quick add payment (long press action)
+function quickAddPayment(method) {
+	if (remainingAmount.value <= 0) return
+
+	lastSelectedMethod.value = method
+
+	let amt = remainingAmount.value
+
+	// Non-cash payments can never exceed the remaining balance
+	if (!isCashPaymentMethod(method) && !method?.is_customer_credit) {
+		const maxAllowed = roundCurrency(Math.max(0, props.grandTotal - totalPaid.value))
+
+		if (maxAllowed <= 0) {
+			showWarning(
+				__("Cannot add more non-cash payments. Use cash for overpayment."),
+			)
+			return
+		}
+
+		amt = maxAllowed
+	}
+
+	// For mixed payments in exact amount mode, validate total doesn't exceed grand total
+	if (
+		isExactAmountModeActive.value &&
+		hasNonCashPayment.value &&
+		isCashPaymentMethod(method)
+	) {
+		const maxAllowed = roundCurrency(props.grandTotal) - totalPaid.value
+		if (maxAllowed <= 0) {
+			showInfo(__("Invoice fully paid. No additional payment needed."))
+			return
+		}
+		// For quick add (long press), use exact remaining to complete payment
+		amt = maxAllowed
+	}
+
+	paymentEntries.value.push({
+		mode_of_payment: method.mode_of_payment,
+		amount: roundCurrency(amt),
+		type: method.type || __("Cash"),
+	})
+	log.debug("[PaymentDialog] Long press payment added:", method.mode_of_payment)
+}
+
+// Initialize long press composable with callbacks
+const {
+	onPointerDown: handlePointerDown,
+	onPointerUp: handlePointerUp,
+	onPointerCancel: handlePointerCancel,
+} = useLongPress({
+	duration: 500,
+	onTap: selectPaymentMethod,
+	onLongPress: quickAddPayment,
+})
+
+// Wrapper handlers to pass method to composable
+function onPaymentMethodDown(method, event) {
+	handlePointerDown(event, method)
+}
+
+function onPaymentMethodUp(method) {
+	handlePointerUp(method)
+}
+
+function onPaymentMethodCancel() {
+	handlePointerCancel()
+}
+
+// Add custom amount for a method
+function addCustomPayment(method, amount) {
+	log.debug("[PaymentDialog] Add custom payment:", {
+		method: method.mode_of_payment,
+		amount: amount,
+		currentEntries: paymentEntries.value.length,
+	})
+
+	let amt = Number.parseFloat(amount)
+	if (!amt || amt <= 0) return
+
+	// Non-cash payments can never exceed the remaining balance (no change allowed for non-cash)
+	if (!isCashPaymentMethod(method) && !method?.is_customer_credit) {
+		const maxAllowed = roundCurrency(Math.max(0, props.grandTotal - totalPaid.value))
+
+		if (maxAllowed <= 0) {
+			showWarning(
+				__("Cannot add more non-cash payments. Use cash for overpayment."),
+			)
+			return
+		}
+
+		if (isExactAmountModeActive.value) {
+			// In exact amount mode, non-cash must equal exactly the remaining balance
+			if (roundCurrency(amt) !== maxAllowed) {
+				showWarning(
+					__("Non-cash payment must equal {0} exactly", [
+						formatCurrency(maxAllowed),
+					]),
+				)
+				return
+			}
+		} else if (roundCurrency(amt) > maxAllowed) {
+			// Outside exact mode, non-cash still cannot cause overpayment/change
+			showWarning(
+				__("Non-cash payment cannot exceed remaining amount ({0})", [
+					formatCurrency(maxAllowed),
+				]),
+			)
+			return
+		}
+
+		amt = Math.min(amt, maxAllowed)
+	}
+
+	// For mixed payments in exact amount mode, validate cash total doesn't exceed grand total
+	if (
+		isExactAmountModeActive.value &&
+		hasNonCashPayment.value &&
+		isCashPaymentMethod(method)
+	) {
+		const newTotal = totalPaid.value + amt
+		if (newTotal > roundCurrency(props.grandTotal)) {
+			showWarning(
+				__("Mixed payment cannot exceed invoice total. Limit: {0}", [
+					formatCurrency(roundCurrency(props.grandTotal) - totalPaid.value),
+				]),
+			)
+			return
+		}
+	}
+
+	paymentEntries.value.push({
+		mode_of_payment: method.mode_of_payment,
+		amount: amt,
+		type: method.type || __("Cash"),
+	})
+
+	log.debug("[PaymentDialog] Payment added, new entries:", paymentEntries.value)
+	customAmount.value = ""
+}
+
+// Apply existing customer credit to payment
+function applyCustomerCredit() {
+	log.debug("[PaymentDialog] Apply customer credit:", {
+		totalCredit: totalAvailableCredit.value,
+		remainingAmount: remainingAmount.value,
+		currentEntries: paymentEntries.value.length,
+	})
+
+	if (remainingAmount.value === 0 || totalAvailableCredit.value === 0) return
+
+	// Calculate how much credit to apply (min of remaining amount and available credit)
+	const creditToApply = Math.min(
+		remainingAmount.value,
+		totalAvailableCredit.value,
+	)
+
+	// Add credit as a payment entry
+	paymentEntries.value.push({
+		mode_of_payment: "Customer Credit",
+		amount: roundCurrency(creditToApply),
+		type: "Credit",
+		is_customer_credit: true,
+		credit_details: customerCredit.value.map((credit) => ({
+			...credit,
+			credit_to_redeem: 0, // Will be calculated on backend
+		})),
+	})
+
+	log.debug(
+		"[PaymentDialog] Existing credit applied, new entries:",
+		paymentEntries.value,
+	)
+}
+
+// Add "Pay on Account" - Credit Sale (invoice with outstanding amount)
+function addCreditAccountPayment() {
+	log.debug("[PaymentDialog] Add credit account payment (Pay Later):", {
+		grandTotal: props.grandTotal,
+		currentPaid: totalPaid.value,
+		remainingAmount: remainingAmount.value,
+	})
+
+	// Close dialog and complete as credit sale (0 payment)
+	// The backend will create an invoice with outstanding amount
+	const paymentData = {
+		payments: [], // No payments - full amount on credit
+		change_amount: 0,
+		is_partial_payment: false,
+		is_credit_sale: true, // Mark as credit sale
+		paid_amount: 0,
+		outstanding_amount: props.grandTotal,
+	}
+
+	log.debug(
+		"[PaymentDialog] Emitting credit sale payment-completed:",
+		paymentData,
+	)
+	emit("payment-completed", paymentData)
+	show.value = false
+}
+
+function clearAll() {
+	paymentEntries.value = []
+	customAmount.value = ""
+}
+
+function completePayment() {
+	log.debug("[PaymentDialog] Complete payment called:", {
+		canComplete: canComplete.value,
+		totalPaid: totalPaid.value,
+		grandTotal: props.grandTotal,
+		allowPartialPayment: props.allowPartialPayment,
+		paymentEntries: paymentEntries.value,
+		salesPersons: selectedSalesPersons.value,
+		writeOff: {
+			canWriteOff: canWriteOff.value,
+			applyWriteOff: applyWriteOff.value,
+			writeOffAmount: writeOffAmount.value,
+		},
+	})
+
+	if (!canComplete.value) {
+		log.warn("[PaymentDialog] Cannot complete - validation failed")
+		return
+	}
+
+	// Calculate if this is a partial payment (considering write-off)
+	const effectivePaid = totalPaid.value + writeOffAmount.value
+	const isPartial = effectivePaid < props.grandTotal
+
+	const paymentData = {
+		payments: paymentEntries.value,
+		change_amount: changeAmount.value,
+		is_partial_payment: isPartial,
+		paid_amount: totalPaid.value,
+		outstanding_amount: isPartial
+			? remainingAmount.value - writeOffAmount.value
+			: 0,
+		sales_team:
+			selectedSalesPersons.value.length > 0 ? selectedSalesPersons.value : null,
+		delivery_date: isSalesOrder.value ? deliveryDate.value : null,
+		// Write-off data
+		write_off_amount: writeOffAmount.value,
+		is_write_off: writeOffAmount.value > 0,
+		// Loyalty Points data
+		redeem_loyalty_points:
+			isPointsRedemptionActive.value && redeemedLoyaltyAmount.value > 0 ? 1 : 0,
+		loyalty_points: isPointsRedemptionActive.value ? pointsToRedeem.value : 0,
+		loyalty_amount: isPointsRedemptionActive.value
+			? redeemedLoyaltyAmount.value
+			: 0,
+		loyalty_program:
+			isPointsRedemptionActive.value && loyaltyPointInfo.value
+				? loyaltyPointInfo.value.loyalty_program
+				: null,
+		loyalty_redemption_account: isPointsRedemptionActive.value
+			? settingsStore.loyaltyRedemptionAccount
+			: null,
+		loyalty_redemption_cost_center: isPointsRedemptionActive.value
+			? settingsStore.loyaltyRedemptionCostCenter
+			: null,
+		// Remarks
+		remarks: remarks.value || null,
+	}
+
+	log.debug("[PaymentDialog] Emitting payment-completed:", paymentData)
+
+	emit("payment-completed", paymentData)
+
+	show.value = false
+}
+
+function formatCurrency(amount) {
+	return formatCurrencyUtil(Number.parseFloat(amount || 0), props.currency)
+}
+
+// Get total amount for a specific payment method
+function getMethodTotal(methodName) {
+	return paymentEntries.value
+		.filter((entry) => entry.mode_of_payment === methodName)
+		.reduce((sum, entry) => sum + (entry.amount || 0), 0)
+}
+
+// Additional discount handlers
+function handleAdditionalDiscountChange() {
+	let discountValue = localAdditionalDiscount.value
+	let discountAmount = 0
+
+	// If percentage mode, calculate amount
+	if (additionalDiscountType.value === "percentage") {
+		// Validate against max_discount_allowed if configured
+		if (
+			settingsStore.maxDiscountAllowed > 0 &&
+			discountValue > settingsStore.maxDiscountAllowed
+		) {
+			localAdditionalDiscount.value = settingsStore.maxDiscountAllowed
+			discountValue = settingsStore.maxDiscountAllowed
+			// Show warning toast
+			showWarning(
+				__("Maximum allowed discount is {0}%", [
+					settingsStore.maxDiscountAllowed,
+				]),
+			)
+		}
+
+		// Ensure percentage is between 0-100
+		if (discountValue > 100) {
+			localAdditionalDiscount.value = 100
+			discountValue = 100
+		}
+
+		// Convert percentage to amount
+		discountAmount = (props.subtotal * discountValue) / 100
+	} else {
+		// Amount mode
+		discountAmount = discountValue
+
+		// For amount mode, check if it exceeds percentage limit when converted
+		if (settingsStore.maxDiscountAllowed > 0 && props.subtotal > 0) {
+			const percentageEquivalent = (discountAmount / props.subtotal) * 100
+			if (percentageEquivalent > settingsStore.maxDiscountAllowed) {
+				const maxAmount =
+					(props.subtotal * settingsStore.maxDiscountAllowed) / 100
+				localAdditionalDiscount.value = maxAmount
+				discountAmount = maxAmount
+				// Show warning toast
+				showWarning(
+					__("Maximum allowed discount is {0}% ({1} {2})", [
+						settingsStore.maxDiscountAllowed,
+						props.currency,
+						maxAmount.toFixed(2),
+					]),
+				)
+			}
+		}
+	}
+
+	// Ensure discount doesn't exceed subtotal
+	if (discountAmount > props.subtotal) {
+		if (additionalDiscountType.value === "amount") {
+			localAdditionalDiscount.value = props.subtotal
+		}
+		discountAmount = props.subtotal
+	}
+
+	// Ensure non-negative
+	if (discountAmount < 0) {
+		localAdditionalDiscount.value = 0
+		discountAmount = 0
+	}
+
+	emit("update-additional-discount", discountAmount)
+}
+
+function handleAdditionalDiscountTypeChange() {
+	// Don't reset - preserve last value when toggling type
+	// Just recalculate to ensure it's within limits
+	handleAdditionalDiscountChange()
+}
+
+function incrementDiscount() {
+	const step = additionalDiscountType.value === "percentage" ? 1 : 5
+	localAdditionalDiscount.value = (localAdditionalDiscount.value || 0) + step
+	handleAdditionalDiscountChange()
+}
+
+function decrementDiscount() {
+	const step = additionalDiscountType.value === "percentage" ? 1 : 5
+	const newValue = (localAdditionalDiscount.value || 0) - step
+	localAdditionalDiscount.value = newValue < 0 ? 0 : newValue
+	handleAdditionalDiscountChange()
+}
+
+// Watch for dialog open to sync additional discount from parent
+watch(
+	() => props.modelValue,
+	(isOpen) => {
+		if (isOpen) {
+			// Only sync when dialog opens, not continuousl
+			localAdditionalDiscount.value = props.additionalDiscount || 0
+		}
+	},
+)
+
+// Sync local discount when prop changes (needed for external updates like Compliment)
+watch(
+	() => props.additionalDiscount,
+	(newVal) => {
+		localAdditionalDiscount.value = newVal || 0
+	},
+)
+</script>

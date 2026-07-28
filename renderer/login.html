@@ -1,0 +1,75 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>POS Desktop — Setup Device</title>
+    <style>
+      body { font-family: sans-serif; max-width: 420px; margin: 2rem auto; }
+      label { display: block; margin-top: 0.75rem; font-size: 0.9rem; }
+      input { width: 100%; padding: 0.4rem; box-sizing: border-box; }
+      button { margin-top: 1.25rem; padding: 0.6rem 1rem; width: 100%; }
+      #msg { margin-top: 1rem; font-size: 0.9rem; white-space: pre-wrap; }
+      #msg.error { color: #b00020; }
+      #msg.success { color: #146c2e; }
+    </style>
+  </head>
+  <body>
+    <h2>Setup Device — Login Pertama Kali</h2>
+    <p style="color:#555; font-size:0.85rem;">
+      Butuh koneksi internet. Setelah berhasil, device ini akan tersimpan
+      permanen dan tidak perlu login lagi.
+    </p>
+    <form id="setup-form">
+      <label>Server URL (mis. https://erp.contoh.com)
+        <input type="text" name="baseUrl" required />
+      </label>
+      <label>Username / Email
+        <input type="text" name="usr" required />
+      </label>
+      <label>Password
+        <input type="password" name="pwd" required />
+      </label>
+      <label>Kode Outlet (mis. JKT01)
+        <input type="text" name="outletCode" required />
+      </label>
+      <label>POS Profile Default
+        <input type="text" name="posProfile" required />
+      </label>
+      <label>Default Warehouse
+        <input type="text" name="defaultWarehouse" required />
+      </label>
+      <button type="submit">Setup & Login</button>
+    </form>
+    <div id="msg"></div>
+
+    <script>
+      const form = document.getElementById("setup-form");
+      const msg = document.getElementById("msg");
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        msg.className = "";
+        msg.textContent = "Menghubungi server...";
+
+        const data = Object.fromEntries(new FormData(form).entries());
+        try {
+          const res = await fetch("http://127.0.0.1:8871/auth/setup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          });
+          const json = await res.json();
+          if (!res.ok || !json.ok) {
+            throw new Error(json.error || "Setup gagal");
+          }
+          msg.className = "success";
+          msg.textContent = "Setup berhasil untuk user " + json.device.user + ". Membuka aplikasi kasir...";
+          window.posDesktop.notifySetupComplete();
+        } catch (err) {
+          msg.className = "error";
+          msg.textContent = "Error: " + err.message;
+        }
+      });
+    </script>
+  </body>
+</html>

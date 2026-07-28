@@ -1,0 +1,28 @@
+{
+  "name": "pos-desktop-renderer",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build"
+  },
+  "dependencies": {
+    "@abdulrysr/saudi-riyal-new-symbol-font": "^1.0.8",
+    "@heroicons/vue": "^2.2.0",
+    "@iconify-json/lucide": "^1.2.118",
+    "feather-icons": "^4.29.2",
+    "frappe-ui": "^0.1.240",
+    "pinia": "^3.0.3",
+    "unplugin-icons": "^23.0.1",
+    "vue": "3.5.13",
+    "vue-router": "^4.5.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.1.4",
+    "autoprefixer": "^10.4.2",
+    "postcss": "^8.4.5",
+    "tailwindcss": "^3.4.15",
+    "vite": "^5.4.10"
+  }
+}
