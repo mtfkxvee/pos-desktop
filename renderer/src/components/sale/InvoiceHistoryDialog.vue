@@ -116,6 +116,17 @@
 											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
 										</svg>
 									</button>
+									<!-- Cup Label Print Button (purple, distinct from green invoice print) -->
+									<button
+										v-if="settingsStore.allowCupLabelPrint"
+										@click="openLabelDialog(invoice)"
+										class="p-1.5 hover:bg-purple-50 rounded transition-colors"
+										:title="__('Print Cup Labels')"
+									>
+										<svg class="w-4 h-4 text-purple-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+											<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-5 5a2 2 0 01-2.828 0l-7-7A2 2 0 013 9.382V5a2 2 0 012-2z"/>
+										</svg>
+									</button>
 								</div>
 							</div>
 						</div>
@@ -146,6 +157,15 @@
 		:preselected-invoice="selectedInvoiceForReturn"
 		@return-created="handleReturnCreated"
 	/>
+
+	<!-- Cup Label Print Dialog -->
+	<CupLabelDialog
+		v-model="showLabelDialog"
+		:items="labelItems"
+		:loading="labelLoading"
+		:remarks="labelRemarks"
+		:serving="labelServing"
+	/>
 </template>
 
 <script setup>
@@ -161,11 +181,15 @@ import {
 	getCachedInvoiceHistory,
 	getOfflineInvoicesForHistory,
 } from "@/utils/offline/sync"
+import { call } from "@/utils/apiWrapper"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 import ReturnInvoiceDialog from "./ReturnInvoiceDialog.vue"
+import CupLabelDialog from "./CupLabelDialog.vue"
 
 const { showError } = useToast()
+const settingsStore = usePOSSettingsStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -199,6 +223,13 @@ const hasMore = ref(true)
 // Return dialog state
 const showReturnDialog = ref(false)
 const selectedInvoiceForReturn = ref(null)
+
+// Cup label dialog state
+const showLabelDialog = ref(false)
+const labelLoading = ref(false)
+const labelItems = ref([]) // [{ item_name, qty, checked }]
+const labelRemarks = ref("")
+const labelServing = ref("")
 
 // Track if we're loading more (appending) vs fresh load (replacing)
 const isLoadingMore = ref(false)
@@ -339,6 +370,39 @@ function viewInvoice(invoice) {
 
 function printInvoice(invoice) {
 	emit("print-invoice", invoice)
+}
+
+// ── Cup Label Print ──────────────────────────────────────────────────────────
+
+async function openLabelDialog(invoice) {
+	labelItems.value = []
+	labelRemarks.value = ""
+	labelServing.value = ""
+	labelLoading.value = true
+	showLabelDialog.value = true
+
+	try {
+		// pos_next.api.invoices.get_invoice — same cache-first/online RPC path
+		// InvoiceDetailDialog.vue already uses, instead of the old app's direct
+		// same-origin `/api/resource/Sales Invoice/<name>` REST call (which has
+		// no Electron equivalent — there's no same-origin Frappe site here).
+		const doc = await call("pos_next.api.invoices.get_invoice", { invoice_name: invoice.name })
+
+		labelRemarks.value = doc?.remarks || ""
+		labelServing.value = doc?.custom_serving || ""
+		labelItems.value = (doc?.items || [])
+			.filter((item) => !item.is_free_item)
+			.map((item) => ({
+				item_name: item.item_name || item.item_code || "",
+				qty: item.qty || 1,
+				checked: true,
+			}))
+	} catch {
+		showError(__("Gagal memuat item invoice"))
+		showLabelDialog.value = false
+	} finally {
+		labelLoading.value = false
+	}
 }
 
 function canCreateReturn(invoice) {

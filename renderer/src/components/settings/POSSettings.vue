@@ -339,6 +339,16 @@
 										</div>
 										<div class="flex flex-col gap-3">
 											<CheckboxField
+												v-model="settings.is_order"
+												:label="__('Is Order')"
+												:description="__('Tandai setiap invoice dari profil ini dengan is_order = 1')"
+											/>
+											<CheckboxField
+												v-model="settings.enable_order_number"
+												:label="__('Enable Order Number')"
+												:description="__('Isi otomatis field order_number dengan nomor urut per hari. Counter reset tiap ganti hari.')"
+											/>
+											<CheckboxField
 												v-model="settings.allow_credit_sale"
 												:label="__('Allow Credit Sale')"
 												:description="__('Enable sales on credit')"
@@ -363,6 +373,24 @@
 												:label="__('Silent Print')"
 												:description="__('Print without confirmation')"
 											/>
+											<CheckboxField
+												v-model="settings.allow_cup_label_print"
+												:label="__('Allow Cup Label Print')"
+												:description="__('Tampilkan tombol cetak label cup (58x44mm) di Invoice History')"
+											/>
+											<CheckboxField
+												v-model="settings.enable_serving"
+												:label="__('Enable Serving')"
+												:description="__('Tampilkan pilihan Take Away / Dine In di dialog pembayaran (default: Dine In).')"
+											/>
+											<CheckboxField
+												v-model="settings.enable_order_monitor"
+												:label="__('Enable Order Monitor')"
+												:description="__('Tampilkan tab Order Monitor di POS untuk memantau dan update status antrian pesanan.')"
+											/>
+											<p class="text-xs text-gray-400 -mt-1">
+												{{ __('Cup label & struk kini dicetak lewat printer yang sama (lihat Pengaturan Printer) - tidak ada lagi jalur Bluetooth/USB terpisah seperti versi web lama.') }}
+											</p>
 										</div>
 									</div>
 								</div>
@@ -439,9 +467,14 @@ const settings = ref({
 	disable_rounded_total: 1,
 	allow_credit_sale: 0,
 	allow_return: 0,
+	is_order: 0,
+	enable_order_number: 0,
 	allow_write_off_change: 0,
 	allow_partial_payment: 0,
 	silent_print: 0,
+	allow_cup_label_print: 0,
+	enable_serving: 0,
+	enable_order_monitor: 0,
 	allow_negative_stock: 0,
 	allow_zero_valuation: 0,
 	tax_inclusive: 0,

@@ -3,13 +3,12 @@
 		class="flex flex-col bg-gray-50 overflow-x-hidden"
 		style="height: 100vh; max-height: 100vh"
 	>
-		<!-- Loading State -->
-		<LoadingSpinner v-if="uiStore.isLoading" />
-
-		<!-- Main App -->
-		<template v-else>
-			<!-- Header -->
-			<POSHeader
+		<!-- App shell (header, sidebar, layout) always renders immediately —
+		     only the content area that actually depends on init data (Products/
+		     Customers panel below) shows its own loading state. Desktop apps
+		     don't blank the whole window while data loads. -->
+		<!-- Header -->
+		<POSHeader
 				:current-time="shiftStore.currentTime"
 				:shift-duration="shiftStore.shiftDuration"
 				:has-open-shift="shiftStore.hasOpenShift"
@@ -25,15 +24,11 @@
 				:cache-stats="itemStore.cacheStats"
 				:stock-sync-active="isStockSyncActive"
 				:is-refreshing="stockStore.refreshing"
-				:speed-mode-active="speedModeStore.isActive"
-				:speed-mode-syncing="speedModeStore.isSyncing"
-				:speed-mode-sync-stage="speedModeStore.syncStage"
 				@sync-click="handleSyncClick"
 				@printer-click="uiStore.showHistoryDialog = true"
 				@refresh-click="handleRefresh"
 				@clear-cache="handleClearCache"
 				@print-format-change="setPrintFormat"
-				@speed-mode-click="handleSpeedModeClick"
 				:print-format="printFormat"
 				@logout="uiStore.showLogoutDialog = true"
 			>
@@ -298,26 +293,46 @@
 								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/></svg>
 								{{ __('Customers (Online)') }}
 							</button>
+							<button
+								v-if="posSettingsStore.enableOrderMonitor"
+								@click="activeLeftTab = 'orders'"
+								:class="[
+									'flex-1 py-3 text-sm font-medium border-b-2 transition-colors flex items-center justify-center gap-2',
+									activeLeftTab === 'orders' ? 'border-orange-500 text-orange-600 bg-orange-50/50' : 'border-transparent text-gray-500 hover:text-gray-700 hover:bg-gray-50'
+								]"
+							>
+								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+								{{ __('Order Monitor') }}
+							</button>
 						</div>
 
 						<!-- Content Area -->
 						<div class="flex-1 flex flex-col min-h-0 relative">
-							<keep-alive>
-								<ItemsSelector
-									v-if="activeLeftTab === 'items'"
-									ref="itemsSelectorRef"
+							<div v-if="uiStore.isLoading" class="flex-1 flex items-center justify-center">
+								<LoadingSpinner />
+							</div>
+							<template v-else>
+								<keep-alive>
+									<ItemsSelector
+										v-if="activeLeftTab === 'items'"
+										ref="itemsSelectorRef"
+										:pos-profile="shiftStore.profileName"
+										:cart-items="cartStore.invoiceItems"
+										:currency="shiftStore.profileCurrency"
+										@item-selected="handleItemSelected"
+									/>
+								</keep-alive>
+
+								<CustomerSelector
+									v-if="activeLeftTab === 'customers'"
 									:pos-profile="shiftStore.profileName"
-									:cart-items="cartStore.invoiceItems"
-									:currency="shiftStore.profileCurrency"
-									@item-selected="handleItemSelected"
+									@customer-selected="handleCustomerSelected"
 								/>
-							</keep-alive>
-							
-							<CustomerSelector
-								v-if="activeLeftTab === 'customers'"
-								:pos-profile="shiftStore.profileName"
-								@customer-selected="handleCustomerSelected" 
-							/>
+
+								<OrderMonitor
+									v-if="activeLeftTab === 'orders' && posSettingsStore.enableOrderMonitor"
+								/>
+							</template>
 						</div>
 					</div>
 
@@ -513,14 +528,12 @@
 			@authorized="paymentDialogRef?.openDiscountDialog()"
 		/>
 
-		<SpeedModeInfoDialog
-			v-model="showSpeedModeInfoDialog"
-			@confirm="speedModeStore.activate()"
-		/>
-
-		<SpeedModeNotReadyDialog
-			v-model="showSpeedModeNotReadyDialog"
-			:initial-checks="speedModeNotReadyChecks"
+		<!-- Auto cup label popup after transaction -->
+		<CupLabelDialog
+			v-model="showAutoLabelDialog"
+			:items="autoLabelItems"
+			:remarks="autoLabelRemarks"
+			:serving="autoLabelServing"
 		/>
 
 			<!-- Customer Selection Dialog -->
@@ -636,6 +649,7 @@
 				:currency="shiftStore.profileCurrency"
 				@sync-all="handleSyncAll"
 				@delete-invoice="handleDeleteOfflineInvoice"
+				@retry-invoice="handleRetryOfflineInvoice"
 				@edit-invoice="handleEditOfflineInvoice"
 				@print-invoice="handlePrintOfflineInvoice"
 				@return-invoice="handleReturnOfflineInvoice"
@@ -667,6 +681,12 @@
 				:pos-profile="shiftStore.profileName"
 				:current-warehouse="shiftStore.profileWarehouse"
 				@warehouse-changed="handleWarehouseChanged"
+			/>
+
+			<!-- Printer Settings -->
+			<PrinterSettingsDialog
+				v-if="showPrinterSettings"
+				@close="showPrinterSettings = false"
 			/>
 
 			<!-- Valuation Rate Warning -->
@@ -730,15 +750,6 @@
 			<SyncStatusDialog
 				v-if="showSyncStatusDialog"
 				@close="showSyncStatusDialog = false"
-				:is-offline="offlineStore.isOffline"
-				:is-syncing="offlineStore.isSyncing"
-				:cache-stats="itemStore.cacheStats"
-				:pending-invoices-count="offlineStore.pendingInvoicesCount"
-				:pos-profile="shiftStore.profileName"
-				@sync-all="handleSyncAll"
-				@items-synced="handleItemsSynced"
-				@customers-synced="handleCustomersSynced"
-				@view-pending="handleViewPendingFromSync"
 			/>
 
 			<!-- Print Format Dialog -->
@@ -1049,9 +1060,40 @@
 				@confirm="versionCheck.performHardRefresh"
 			/>
 
-			<!-- Footer -->
-			<POSFooter />
-		</template>
+			<!-- Order Reminder -->
+			<Transition name="reminder-slide">
+				<div
+					v-if="showOrderReminder && posSettingsStore.enableOrderMonitor"
+					class="fixed top-24 left-1/2 -translate-x-1/2 z-50 w-full max-w-sm px-4"
+				>
+					<div class="bg-white border-2 border-orange-400 rounded-2xl shadow-xl p-4">
+						<div class="flex items-start gap-3">
+							<div class="shrink-0 w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-xl">⚠️</div>
+							<div class="flex-1 min-w-0">
+								<p class="text-sm font-bold text-gray-800">{{ pendingOrderCount }} pesanan belum selesai!</p>
+								<p class="text-xs text-gray-500 mt-0.5">Jangan lupa tandai pesanan yang sudah selesai di Order Monitor.</p>
+							</div>
+						</div>
+						<div class="flex gap-2 mt-3">
+							<button
+								@click="goToOrderMonitor"
+								class="flex-1 py-2 text-xs font-semibold rounded-lg bg-orange-500 hover:bg-orange-600 text-white transition-colors"
+							>
+								Lihat Order
+							</button>
+							<button
+								@click="dismissOrderReminder"
+								class="px-4 py-2 text-xs font-semibold rounded-lg bg-gray-100 hover:bg-gray-200 text-gray-600 transition-colors"
+							>
+								Tutup
+							</button>
+						</div>
+					</div>
+				</div>
+			</Transition>
+
+		<!-- Footer -->
+		<POSFooter />
 	</div>
 </template>
 
@@ -1059,8 +1101,15 @@
 // Module-scoped init guard — prevents redundant heavy initialization
 // when component remounts due to translationVersion changes.
 // Tracks the profile name so a shift change correctly re-initializes.
-const _initializedProfile = null
-const _posInitPromise = null
+// Both are reassigned elsewhere in this file (search _posInitPromise /
+// _initializedProfile) — must be `let`, not `const`. Declaring them const
+// was a pre-existing bug from the ported code: every reassignment threw
+// "Assignment to constant variable", silently aborting init mid-way
+// (caught by Vue's lifecycle-hook error handling, not a hard crash) and
+// leaving the UI on stale/default state — e.g. an empty item catalog and a
+// blank POS Profile, looking like the shift-opening dialog got bypassed.
+let _initializedProfile = null
+let _posInitPromise = null
 </script>
 
 <script setup>
@@ -1082,15 +1131,18 @@ import InvoiceHistoryDialog from "@/components/sale/InvoiceHistoryDialog.vue";
 import ItemSelectionDialog from "@/components/sale/ItemSelectionDialog.vue";
 import CustomerSelector from "@/components/sale/CustomerSelector.vue"
 import ItemsSelector from "@/components/sale/ItemsSelector.vue";
+import OrderMonitor from "@/components/sale/OrderMonitor.vue";
 import OffersDialog from "@/components/sale/OffersDialog.vue";
 import OfflineInvoicesDialog from "@/components/sale/OfflineInvoicesDialog.vue";
 import PaymentDialog from "@/components/sale/PaymentDialog.vue";
 import DiscountAuthDialog from "@/components/sale/DiscountAuthDialog.vue";
+import CupLabelDialog from "@/components/sale/CupLabelDialog.vue";
 import PromotionManagement from "@/components/sale/PromotionManagement.vue";
 import ReturnInvoiceDialog from "@/components/sale/ReturnInvoiceDialog.vue";
 import ValuationWarningDialog from "@/components/sale/ValuationWarningDialog.vue";
 import WarehouseAvailabilityDialog from "@/components/sale/WarehouseAvailabilityDialog.vue";
 import POSSettings from "@/components/settings/POSSettings.vue";
+import PrinterSettingsDialog from "@/components/pos/PrinterSettingsDialog.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import JournalEntryManagement from "@/components/journal/JournalEntryManagement.vue";
 import POSClosingManagement from "@/components/journal/POSClosingManagement.vue";
@@ -1106,7 +1158,7 @@ import { offlineWorker } from "@/utils/offline/workerClient";
 import { offlineState } from "@/utils/offline/offlineState";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import { generateOfflineInvoiceId } from "@/utils/offline/invoiceId";
-import { printInvoice, printInvoiceByName, printInvoiceCustom } from "@/utils/printInvoice";
+import { printInvoiceByName, printInvoiceCustom } from "@/utils/printInvoice";
 import { usePrintFormat } from "@/composables/usePrintFormat";
 import { useVersionCheck } from "@/composables/useVersionCheck";
 import PrintFormatDialog from "@/components/pos/PrintFormatDialog.vue";
@@ -1121,15 +1173,12 @@ import { useStockStore } from "@/stores/stock";
 // Pinia Stores
 import { usePOSCartStore } from "@/stores/posCart";
 import { usePOSDraftsStore } from "@/stores/posDrafts";
+import { usePOSOffersStore } from "@/stores/posOffers";
 import { usePOSSettingsStore } from "@/stores/posSettings";
 import { usePOSShiftStore } from "@/stores/posShift";
 import { usePOSSyncStore } from "@/stores/posSync";
 import { usePOSUIStore } from "@/stores/posUI";
-import { useSpeedModeStore } from "@/stores/posSpeedMode";
 import SyncStatusDialog from "@/components/pos/SyncStatusDialog.vue";
-import SpeedModeInfoDialog from "@/components/sale/SpeedModeInfoDialog.vue";
-import SpeedModeNotReadyDialog from "@/components/sale/SpeedModeNotReadyDialog.vue";
-import { getSpeedModeReadiness } from "@/composables/useSpeedModeReadiness";
 import { logger } from "@/utils/logger";
 
 // Initialize stores
@@ -1142,7 +1191,7 @@ const posSettingsStore = usePOSSettingsStore();
 const itemStore = useItemSearchStore();
 const stockStore = useStockStore();
 const customerSearchStore = useCustomerSearchStore();
-const speedModeStore = useSpeedModeStore();
+const offersStore = usePOSOffersStore();
 // Note: settingsStore is an alias to posSettingsStore (same Pinia store singleton)
 const settingsStore = posSettingsStore;
 
@@ -1223,6 +1272,7 @@ const showPromotionManagement = ref(false);
 
 // Settings dialog
 const showPOSSettings = ref(false);
+const showPrinterSettings = ref(false);
 
 // Stock Lookup dialog (Products menu)
 const showStockLookup = ref(false);
@@ -1239,16 +1289,72 @@ const showDeliveryNotes = ref(false);
 const paymentDialogRef = ref(null);
 const showDiscountAuthDialog = ref(false);
 
-// Speed Mode dialogs
-const showSpeedModeInfoDialog = ref(false);
-const showSpeedModeNotReadyDialog = ref(false);
-const speedModeNotReadyChecks = ref([]);
+// Auto cup label popup after transaction
+const showAutoLabelDialog = ref(false);
+const autoLabelItems = ref([]);
+const autoLabelRemarks = ref("");
+const autoLabelServing = ref("");
 
 // Warehouse availability dialog state
 const showWarehouseDialog = ref(false)
 const warehouseDialogItem = ref(null)
 
 const activeLeftTab = ref('items')
+
+// ============================================================================
+// ORDER REMINDER
+// ============================================================================
+const REMINDER_THRESHOLD = 5
+const REMINDER_COOLDOWN_MS = 3 * 60 * 1000 // 3 minutes
+const REMINDER_POLL_MS = 60 * 1000 // check every 1 minute
+
+const showOrderReminder = ref(false)
+const pendingOrderCount = ref(0)
+let reminderLastDismissed = 0
+let reminderPollTimer = null
+
+async function checkPendingOrders() {
+	if (!posSettingsStore.enableOrderMonitor) return
+	try {
+		const now = new Date()
+		const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
+		const result = await call("pos_next.api.order_tracking.get_order_tracking", { date: localDate })
+		const count = (result || []).length
+		pendingOrderCount.value = count
+		const cooldownExpired = Date.now() - reminderLastDismissed > REMINDER_COOLDOWN_MS
+		if (count >= REMINDER_THRESHOLD && cooldownExpired) {
+			showOrderReminder.value = true
+		} else if (count < REMINDER_THRESHOLD) {
+			showOrderReminder.value = false
+		}
+	} catch (_) {}
+}
+
+function dismissOrderReminder() {
+	showOrderReminder.value = false
+	reminderLastDismissed = Date.now()
+}
+
+function goToOrderMonitor() {
+	showOrderReminder.value = false
+	reminderLastDismissed = Date.now()
+	activeLeftTab.value = "orders"
+}
+
+onMounted(() => {
+	if (posSettingsStore.enableOrderMonitor) {
+		// Initial check after a short delay to let POS finish loading
+		setTimeout(checkPendingOrders, 3000)
+		// Periodic poll every minute — no Socket.IO channel to push this
+		// instead (see server/sync/scheduler.js), so polling is the only
+		// way other terminals' progress shows up here.
+		reminderPollTimer = setInterval(checkPendingOrders, REMINDER_POLL_MS)
+	}
+})
+
+onUnmounted(() => {
+	if (reminderPollTimer) clearInterval(reminderPollTimer)
+})
 
 // Infinite scroll refstory data (used by InvoiceManagement component)
 const invoiceHistoryData = ref([]);
@@ -1578,6 +1684,18 @@ onMounted(async () => {
 			stockStore.setWarehouse(shiftStore.profileWarehouse);
 		}
 
+		// Reveal the item grid now, not after settings/tax rules finish below.
+		// uiStore.isLoading is the ONLY thing gating <ItemsSelector> (see the
+		// v-if a few hundred lines up), and browsing/searching items has no
+		// actual dependency on POS Settings or tax rules — those only matter
+		// once an item is in the cart, where they're already applied
+		// reactively as they arrive. Measured live: this sequential chain
+		// (checkShift -> settings -> tax rules) was adding 30-40s before the
+		// item search box became usable, none of it item-catalog-related.
+		// The outer onMounted's `finally { uiStore.setLoading(false) }` still
+		// runs after full completion too — harmless, already false by then.
+		uiStore.setLoading(false);
+
 		// Fast-path: server is down — skip all server-dependent calls (settings,
 		// tax rules) and go straight to offline mode using cached IndexedDB data.
 		// This prevents another 10-second wait after checkShift already detected
@@ -1587,6 +1705,12 @@ onMounted(async () => {
 				cartStore.setDefaultCustomer(),
 				offlineStore.checkOfflineCacheAvailability(),
 				draftsStore.updateDraftsCount(),
+				// Best-effort even offline — falls back to whatever's cached in
+				// IndexedDB from a previous session (see both stores' offline
+				// branches). Not guaranteed to have anything, but costs nothing
+				// to try, and puts the cart in a warm state immediately if it does.
+				customerSearchStore.loadAllCustomers(shiftStore.profileName),
+				offersStore.ensureOffersFetched(shiftStore.profileName).catch(() => {}),
 			]);
 			_initializedProfile = shiftStore.profileName;
 			return;
@@ -1601,6 +1725,20 @@ onMounted(async () => {
 			cartStore.setDefaultCustomer(),
 			offlineStore.preloadDataForOffline(shiftStore.currentProfile),
 			draftsStore.updateDraftsCount(),
+			// Warm these up right at shift-open, while the connection has just
+			// been confirmed reachable, instead of waiting for the cashier's
+			// first search/cart-add to discover a promo/customer fetch is slow
+			// or failing. InvoiceCart.vue's own on-mount calls become no-ops
+			// once these resolve (loadAllCustomers/ensureOffersFetched both
+			// skip re-fetching once they already have data) — this just gives
+			// them a head start with the best chance of a healthy connection,
+			// and a full retry budget before the cashier can even reach the
+			// cart. Failures here still get a real second shot later — the
+			// offer's own retry/banner (triggerOfferProcessing) and the
+			// customer store's own retry (loadAllCustomers) both still run on
+			// their normal triggers regardless of how this attempt goes.
+			customerSearchStore.loadAllCustomers(shiftStore.profileName),
+			offersStore.ensureOffersFetched(shiftStore.profileName).catch(() => {}),
 		]);
 
 		// Wait for settings (required for tax rules) + all background ops
@@ -1660,7 +1798,15 @@ watch(
 
 		// Set new timer - reapply offers after 500ms of no changes
 		offerReapplyTimer.value = setTimeout(async () => {
-			await cartStore.reapplyOffer(shiftStore.currentProfile);
+			// reapplyOffer now rethrows on failure (see posCart.js) so its
+			// primary caller, triggerOfferProcessing, can retry/warn — this
+			// is a separate, supplementary trigger, so just log rather than
+			// leaving an unhandled rejection.
+			try {
+				await cartStore.reapplyOffer(shiftStore.currentProfile);
+			} catch (err) {
+				log.error("reapplyOffer (cart watcher) failed", err);
+			}
 		}, 500);
 	}
 );
@@ -1682,7 +1828,11 @@ watch(
 			// Reapply offers immediately when customer changes
 			// This will discover newly eligible offers even if cart has no current offers
 			offerReapplyTimer.value = setTimeout(async () => {
-				await cartStore.reapplyOffer(shiftStore.currentProfile);
+				try {
+					await cartStore.reapplyOffer(shiftStore.currentProfile);
+				} catch (err) {
+					log.error("reapplyOffer (customer watcher) failed", err);
+				}
 			}, 300);
 		}
 	},
@@ -2117,8 +2267,7 @@ async function handleErrorRetry() {
 
 /**
  * Save the current cart as an offline invoice (queued for sync), print/show
- * success, clear the cart, and record the transaction for Speed Mode.
- * Used for the normal offline checkout flow.
+ * success, and clear the cart. Used for the normal offline checkout flow.
  */
 async function saveCurrentTransactionOffline(paymentData, customerValue, draftIdToDelete) {
 	// Use the same item transformation as online flow for consistency
@@ -2154,6 +2303,7 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 		redeem_loyalty_points: paymentData.redeem_loyalty_points || 0,
 		loyalty_points: paymentData.loyalty_points || 0,
 		loyalty_amount: paymentData.loyalty_amount || 0,
+		loyalty_points_balance: paymentData.loyalty_points_balance ?? null,
 		loyalty_program: paymentData.loyalty_program || null,
 		loyalty_redemption_account: paymentData.loyalty_redemption_account || null,
 		loyalty_redemption_cost_center: paymentData.loyalty_redemption_cost_center || null,
@@ -2171,6 +2321,13 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 
 	await offlineStore.saveInvoiceOffline(invoiceData);
 	uiStore.showPaymentDialog = false;
+
+	// Capture items for the auto cup-label popup before cart is cleared.
+	const pendingLabelItems = posSettingsStore.allowCupLabelPrint
+		? cartStore.invoiceItems
+			.filter((i) => !i.is_free_item)
+			.map((i) => ({ item_name: i.item_name || i.item_code, qty: i.quantity || i.qty || 1 }))
+		: [];
 
 	// Build print data BEFORE clearing cart (cart data will be gone after clear)
 	const offlinePrintData = {
@@ -2218,91 +2375,13 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 		showSuccess(__("Invoice saved offline. Will sync when online"));
 	}
 
-	await speedModeStore.recordTransaction(shiftStore.profileName);
-}
-
-/**
- * Decide whether a failed online submission should be saved as a draft
- * invoice as a fallback (so the transaction isn't lost), instead of just
- * showing an error and discarding it.
- *
- * Only transient/system errors qualify - errors that require the cashier to
- * make a decision (stock, payment config, customer, etc.) are excluded since
- * saving a draft with the same data would just fail again identically.
- */
-function isFallbackEligibleError(errorContext) {
-	const blockedTitles = [
-		__("Insufficient Stock"),
-		__("Validation Error"),
-		__("Pricing Error"),
-		__("Customer Error"),
-		__("Tax Configuration Error"),
-		__("Payment Error"),
-		__("Permission Denied"),
-		__("Duplicate Entry"),
-		__("Not Found"),
-	];
-	return !blockedTitles.includes(errorContext.title);
-}
-
-/**
- * Save the current cart as a server-side Draft Sales Invoice (docstatus=0),
- * used as a fallback when an online submission fails with a retryable/system
- * error and the cart still has the transaction (not yet cleared) - so the
- * sale isn't lost. The cashier can re-open it from Drafts and retry payment.
- */
-async function saveCurrentTransactionAsDraft(customerValue, draftIdToDelete) {
-	let invoiceName;
-
-	// Step 1 of submitInvoice already created/updated a docstatus=0 draft on
-	// the server for this cart before the failure - reuse it instead of
-	// creating a duplicate.
-	if (cartStore.lastInvoiceDraftName) {
-		invoiceName = cartStore.lastInvoiceDraftName;
-	} else {
-		const invoiceData = {
-			doctype: cartStore.targetDoctype || "Sales Invoice",
-			pos_profile: cartStore.posProfile,
-			posa_pos_opening_shift: shiftStore.posOpeningShift,
-			customer: customerValue || shiftStore.profileCustomer,
-			items: cartStore.formatItemsForSubmission(toRaw(cartStore.invoiceItems)),
-			discount_amount: cartStore.additionalDiscount || 0,
-			coupon_code: cartStore.appliedCoupon?.code || cartStore.appliedCoupon?.name || undefined,
-			custom_compliment_reason: cartStore.complimentReason || undefined,
-			is_pos: 1,
-			docstatus: 0,
-			update_stock: 0,
-			remarks: "Draft - Koneksi terputus saat pembayaran",
-			...cartStore.loyaltyData,
-		};
-
-		const draftInvoice = await cartStore.updateInvoiceResource.submit({ data: invoiceData });
-		invoiceName = draftInvoice?.name || draftInvoice?.data?.name;
+	// Auto-show cup label popup when it's enabled for this POS profile
+	if (pendingLabelItems.length > 0) {
+		autoLabelItems.value = pendingLabelItems;
+		autoLabelRemarks.value = paymentData.remarks || "";
+		autoLabelServing.value = paymentData.serving || "";
+		showAutoLabelDialog.value = true;
 	}
-
-	if (!invoiceName) {
-		throw new Error("Failed to save draft invoice - no invoice name returned");
-	}
-
-	uiStore.showPaymentDialog = false;
-
-	// Delete the old draft if we were continuing from a different one
-	if (draftIdToDelete && draftIdToDelete !== invoiceName) {
-		if (cartStore.currentDraftIsServer && !offlineStore.isOffline) {
-			frappeRequest({
-				url: `/api/resource/Sales Invoice/${draftIdToDelete}`,
-				method: 'DELETE'
-			}).catch(e => log.warn("Failed to delete replaced server draft", e));
-		} else {
-			draftsStore.deleteDraft(draftIdToDelete);
-		}
-	}
-
-	cartStore.clearCart();
-	// Reset cart hash after successful save
-	previousCartHash = "";
-
-	showWarning(__("Koneksi bermasalah - transaksi disimpan sebagai draft ({0}). Buka dari menu Draft untuk melanjutkan.", [invoiceName]));
 }
 
 async function handlePaymentCompleted(paymentData) {
@@ -2357,77 +2436,23 @@ async function handlePaymentCompleted(paymentData) {
 		// Delete draft if it exists (since we're submitting/saving invoice)
 		const draftIdToDelete = cartStore.currentDraftId;
 
-		if (offlineStore.isOffline) {
-			await saveCurrentTransactionOffline(paymentData, customerValue, draftIdToDelete);
-		} else {
-			// Get item codes from cart before clearing
-			const soldItemCodes = cartStore.invoiceItems.map((item) => item.item_code);
-
-			const result = await cartStore.submitInvoice();
-
-			if (result) {
-				const invoiceName = result.name || result.message?.name || __("Unknown");
-				const invoiceTotal = result.grand_total || result.total || 0;
-				const paidAmount = paymentData.paid_amount || invoiceTotal;
-
-				uiStore.showPaymentDialog = false;
-				cartStore.clearCart();
-				// Reset cart hash after successful payment
-				previousCartHash = "";
-
-				// Delete draft after successful submission
-				if (draftIdToDelete) {
-					if (cartStore.currentDraftIsServer && !offlineStore.isOffline) {
-						frappeRequest({
-							url: `/api/resource/Sales Invoice/${draftIdToDelete}`,
-							method: 'DELETE'
-						}).catch(e => log.warn("Failed to delete server draft after checkout", e));
-					} else {
-						draftsStore.deleteDraft(draftIdToDelete);
-					}
-				}
-
-				// Refresh stock - Direct API (50-200ms), no Socket.IO lag!
-				await stockStore.refresh(soldItemCodes, shiftStore.profileWarehouse);
-
-				// Refresh invoice history cache in background (non-blocking)
-				loadInvoiceHistoryData().catch((err) =>
-					log.debug("Background invoice cache refresh failed:", err)
-				);
-
-				if (shiftStore.autoPrintEnabled) {
-					try {
-						await handlePrintInvoice({ name: invoiceName });
-						showSuccess(__("Invoice {0} created and sent to printer", [invoiceName]));
-					} catch (error) {
-						log.error("Auto-print error:", error);
-						showWarning(__("Invoice {0} created but print failed", [invoiceName]));
-					}
-				} else {
-					uiStore.showSuccess(invoiceName, invoiceTotal, paidAmount);
-					showSuccess(__("Invoice {0} created successfully", [invoiceName]));
-				}
-
-				await speedModeStore.recordTransaction(shiftStore.profileName);
-			}
-		}
+		// Offline-first, always: every sale is written to the local queue
+		// immediately (no network round-trip on the critical checkout path)
+		// and pushed to the real Frappe server later by the background sync
+		// scheduler (server/sync/push.js + scheduler.js, every ~2 minutes and
+		// on app start) — never blocking or delaying checkout on a live
+		// server call. This used to only happen when offlineStore.isOffline
+		// was true; the online branch (direct update_invoice/submit_invoice)
+		// is intentionally no longer used for the main sale path.
+		await saveCurrentTransactionOffline(paymentData, customerValue, draftIdToDelete);
 	} catch (error) {
-		log.error("Error submitting invoice:", error);
+		// Checkout always writes to the local queue now (see above) — this
+		// only fires if that local write itself failed (e.g. local server
+		// down), not a real Frappe server error, so there's no "retry
+		// online, fall back to a server draft" case to handle here anymore.
+		log.error("Error saving invoice offline:", error);
 
 		const errorContext = parseError(error);
-
-		// Online submission failed with a transient/system error and the cart
-		// still has the transaction (not yet cleared) - save it as a draft so the
-		// sale isn't lost, instead of just showing an error.
-		if (!offlineStore.isOffline && !cartStore.isEmpty && isFallbackEligibleError(errorContext)) {
-			try {
-				const customerValue = cartStore.customer?.name || cartStore.customer;
-				await saveCurrentTransactionAsDraft(customerValue, cartStore.currentDraftId);
-				return;
-			} catch (fallbackError) {
-				log.error("Draft fallback save failed:", fallbackError);
-			}
-		}
 
 		uiStore.showPaymentDialog = false;
 		uiStore.showError(
@@ -2445,12 +2470,6 @@ async function handlePaymentCompleted(paymentData) {
 			showWarning(errorContext.message);
 		}
 	}
-}
-
-function handleViewPendingFromSync() {
-	showSyncStatusDialog.value = false;
-	uiStore.showOfflineInvoicesDialog = true;
-	offlineStore.loadPendingInvoices();
 }
 
 function handleClearCart() {
@@ -2848,6 +2867,13 @@ async function handleApplyOffer(offer) {
 		offersDialogRef.value
 	);
 	if (success) {
+		// Failure paths inside cartStore.applyOffer() already call
+		// offersDialogRef.resetApplyingState() themselves; the success path
+		// doesn't (the offer switches to its "Applied" badge instead, which
+		// visually replaces the spinner) — but the dialog component can stay
+		// mounted-but-hidden across opens, so clear it here too rather than
+		// relying on that being true.
+		offersDialogRef.value?.resetApplyingState();
 		uiStore.showOffersDialog = false;
 	}
 }
@@ -3018,6 +3044,14 @@ async function handleDeleteOfflineInvoice(invoiceId) {
 	}
 }
 
+async function handleRetryOfflineInvoice(invoiceId) {
+	try {
+		await offlineStore.retryOfflineInvoice(invoiceId);
+	} catch (error) {
+		log.error("Error retrying offline invoice:", error);
+	}
+}
+
 async function handlePrintOfflineInvoice(invoiceData) {
 	try {
 		await printInvoiceCustom(invoiceData, getPaperSize() === "80mm" ? "80 PRINTER" : "58 PRINTER");
@@ -3035,45 +3069,9 @@ function handleReturnOfflineInvoice(invoice) {
 	uiStore.showReturnDialog = true;
 }
 
-async function handleItemsSynced() {
-	itemStore.invalidateCache();
-	if (itemsSelectorRef.value) {
-		await itemsSelectorRef.value.loadItems();
-	}
-	const stats = await offlineWorker.getCacheStats();
-	itemStore.cacheStats = stats;
-}
-
-async function handleCustomersSynced() {
-	// Reload customers into memory so they appear in search immediately
-	await customerSearchStore.loadAllCustomers(shiftStore.profileName, true);
-	
-	const stats = await offlineWorker.getCacheStats();
-	itemStore.cacheStats = stats;
-}
-
 async function handleSyncClick() {
 	// Show the detailed sync status dialog
 	showSyncStatusDialog.value = true;
-}
-
-async function handleSpeedModeClick() {
-	if (speedModeStore.isActive) {
-		if (speedModeStore.isSyncing) {
-			showWarning(__("Mohon tunggu sinkronisasi latar belakang selesai sebelum mematikan Speed Mode"));
-			return;
-		}
-		speedModeStore.deactivate();
-		return;
-	}
-
-	const { ready, checks } = await getSpeedModeReadiness(shiftStore.profileName);
-	if (!ready) {
-		speedModeNotReadyChecks.value = checks;
-		showSpeedModeNotReadyDialog.value = true;
-		return;
-	}
-	showSpeedModeInfoDialog.value = true;
 }
 
 async function handleSyncAll() {
@@ -3230,6 +3228,8 @@ function handleManagementMenuClick(menuItem) {
 		showPromotionManagement.value = true;
 	} else if (menuItem === "settings") {
 		showPOSSettings.value = true;
+	} else if (menuItem === "printer-settings") {
+		showPrinterSettings.value = true;
 	} else if (menuItem === "invoices") {
 		// Load invoice history data before showing
 		loadInvoiceHistoryData();
@@ -3313,15 +3313,21 @@ function handleViewInvoice(invoice) {
 	showInvoiceDetail.value = true;
 }
 
-// Centralized print handler - uses printInvoice.js utilities
+// Centralized print handler for REAL (already-synced) Sales Invoices — see
+// handlePrintOfflineInvoice for still-queued offline invoices, which don't
+// exist server-side yet and can't go through this path.
+//
+// Always re-fetches by name via printInvoiceByName rather than reusing
+// invoiceData.items straight from the history list: that list object doesn't
+// carry loyalty_points/redeem_loyalty_points reliably (it's a summary-ish
+// query result, not necessarily the full doc), and only printInvoiceByName
+// fetches the authoritative earned-points + running balance
+// (pos_next.api.invoices.get_invoice_loyalty_points). Reprinting isn't a hot
+// path, so the extra round-trip is worth the correctness.
 async function handlePrintInvoice(invoiceData) {
 	try {
 		const paperSize = getPaperSize()
-		if (invoiceData.items && Array.isArray(invoiceData.items)) {
-			await printInvoice(invoiceData, null, null, paperSize);
-		} else {
-			await printInvoiceByName(invoiceData.name, null, null, paperSize)
-		}
+		await printInvoiceByName(invoiceData.name, null, null, paperSize)
 	} catch (error) {
 		log.error("Error printing invoice:", error);
 		showError(error.message || __("Gagal mencetak invoice"));
@@ -3385,3 +3391,15 @@ function handleTabSwitch(tab) {
 	});
 }
 </script>
+
+<style scoped>
+.reminder-slide-enter-active,
+.reminder-slide-leave-active {
+	transition: all 0.3s ease;
+}
+.reminder-slide-enter-from,
+.reminder-slide-leave-to {
+	opacity: 0;
+	transform: translate(-50%, -16px);
+}
+</style>

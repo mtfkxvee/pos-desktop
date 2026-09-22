@@ -37,12 +37,16 @@ const DEFAULT_SETTINGS = {
 	display_discount_percentage: 0,
 	display_discount_amount: 0,
 	// Operations
+	is_order: 0,
+	enable_order_number: 0,
 	allow_sales_order: 0,
 	allow_select_sales_order: 0,
 	create_only_sales_order: 0,
 	allow_return_without_invoice: 0,
 	allow_free_batch_return: 0,
 	allow_print_draft_invoices: 0,
+	enable_serving: 0,
+	enable_order_monitor: 0,
 	// Pricing & Display
 	decimal_precision: "2",
 	// Customer Settings
@@ -52,6 +56,10 @@ const DEFAULT_SETTINGS = {
 	// Printing
 	allow_print_last_invoice: 0,
 	silent_print: 0,
+	allow_cup_label_print: 0,
+	enable_bluetooth_printer: 0,
+	enable_usb_printer: 0,
+	enable_usb_label_printer: 0,
 	// Delivery
 	use_delivery_charges: 0,
 	auto_set_delivery_charges: 0,
@@ -90,6 +98,13 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const loyaltyProgramsCfMap = computed(
 		() => settings.value.loyalty_programs_cf_map || {},
+	)
+	// Best-effort points-EARNED rate per program (base/lowest tier — see
+	// bootstrap.py), separate from loyaltyProgramsCfMap which is the
+	// REDEMPTION rate. Both come from the same cached/localStorage-persisted
+	// settings payload, so both survive offline/flaky-server sessions.
+	const loyaltyProgramsCollectionFactorMap = computed(
+		() => settings.value.loyalty_programs_collection_factor_map || {},
 	)
 	const loyaltyRedemptionAccount = computed(
 		() => settings.value.loyalty_redemption_account || "",
@@ -161,6 +176,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 
 	// Computed - Operations
+	const isOrder = computed(() => Boolean(settings.value.is_order))
+	const enableOrderNumber = computed(() => Boolean(settings.value.enable_order_number))
 	const allowSalesOrder = computed(() =>
 		Boolean(settings.value.allow_sales_order),
 	)
@@ -178,6 +195,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 	)
 	const allowPrintDraftInvoices = computed(() =>
 		Boolean(settings.value.allow_print_draft_invoices),
+	)
+	const enableServing = computed(() => Boolean(settings.value.enable_serving))
+	const enableOrderMonitor = computed(() =>
+		Boolean(settings.value.enable_order_monitor),
 	)
 
 	// Computed - Pricing & Display
@@ -199,6 +220,18 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.allow_print_last_invoice),
 	)
 	const silentPrint = computed(() => Boolean(settings.value.silent_print))
+	const allowCupLabelPrint = computed(() =>
+		Boolean(settings.value.allow_cup_label_print),
+	)
+	const enableBluetoothPrinter = computed(() =>
+		Boolean(settings.value.enable_bluetooth_printer),
+	)
+	const enableUsbPrinter = computed(() =>
+		Boolean(settings.value.enable_usb_printer),
+	)
+	const enableUsbLabelPrinter = computed(() =>
+		Boolean(settings.value.enable_usb_label_printer),
+	)
 
 	// Computed - Delivery
 	const useDeliveryCharges = computed(() =>
@@ -383,6 +416,7 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		redeemLoyaltyPoints,
 		loyaltyConversionFactor,
 		loyaltyProgramsCfMap,
+		loyaltyProgramsCollectionFactorMap,
 		loyaltyRedemptionAccount,
 		loyaltyRedemptionCostCenter,
 
@@ -411,12 +445,16 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		displayDiscountAmount,
 
 		// Computed - Operations
+		isOrder,
+		enableOrderNumber,
 		allowSalesOrder,
 		allowSelectSalesOrder,
 		createOnlySalesOrder,
 		allowReturnWithoutInvoice,
 		allowFreeBatchReturn,
 		allowPrintDraftInvoices,
+		enableServing,
+		enableOrderMonitor,
 
 		// Computed - Pricing & Display
 		decimalPrecision,
@@ -429,6 +467,10 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Printing
 		allowPrintLastInvoice,
 		silentPrint,
+		allowCupLabelPrint,
+		enableBluetoothPrinter,
+		enableUsbPrinter,
+		enableUsbLabelPrinter,
 
 		// Computed - Delivery
 		useDeliveryCharges,
