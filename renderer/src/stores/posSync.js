@@ -27,6 +27,7 @@ import {
 	getOfflineInvoices,
 	saveOfflineInvoice as saveOfflineInvoiceUtil,
 	deleteOfflineInvoice as deleteOfflineInvoiceUtil,
+	retryOfflineInvoice as retryOfflineInvoiceUtil,
 } from "@/utils/offline"
 import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
@@ -228,6 +229,28 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	}
 
 	/**
+	 * Re-queue a permanently-failed invoice (retry_count exhausted, see
+	 * push.js's MAX_RETRY_COUNT) for another sync attempt, then immediately
+	 * try to push it rather than waiting for the next scheduled sync cycle —
+	 * pushQueuedInvoices() only picks up status='pending' rows, so without
+	 * this a failed invoice has no path back regardless of how long the
+	 * cashier waits.
+	 */
+	async function retryOfflineInvoice(invoiceId) {
+		try {
+			await retryOfflineInvoiceUtil(invoiceId)
+			await syncOfflineInvoices()
+			await loadPendingInvoices()
+			await updatePendingCount()
+			showSuccess(__("Retrying invoice sync..."))
+		} catch (error) {
+			log.error("Failed to retry offline invoice", error)
+			showError(error.message || __("Failed to retry invoice"))
+			throw error
+		}
+	}
+
+	/**
 	 * Sync all pending invoices with user feedback
 	 * @returns {Object} Sync result with success/failed counts
 	 */
@@ -415,6 +438,20 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	// Initialize pending count on store creation
 	updatePendingCount()
 
+	// Keep the header badge genuinely live. Previously this count only ever
+	// refreshed after an action taken IN this renderer (manual sync, saving/
+	// deleting an offline invoice) — it never learned about invoices synced
+	// by the local server's OWN background scheduler (server/sync/
+	// scheduler.js, runs every ~2 min independently of the renderer), so the
+	// badge could sit on a stale number until the cashier happened to
+	// trigger one of those actions or open the Sync Status dialog (which
+	// does its own fresh fetch, which is why it always looked "already
+	// synced" there). Polling here directly — rather than piggybacking on
+	// offlineState's own 5s poll — because that one only notifies
+	// subscribers on an actual online/offline value CHANGE, not every tick,
+	// so it wouldn't have fired during normal steady-state online operation.
+	setInterval(updatePendingCount, 5000)
+
 	// =========================================================================
 	// EXPORTS
 	// =========================================================================
@@ -434,6 +471,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		saveInvoiceOffline,
 		loadPendingInvoices,
 		deleteOfflineInvoice,
+		retryOfflineInvoice,
 		syncAllPending,
 		preloadDataForOffline,
 		checkOfflineCacheAvailability,

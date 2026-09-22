@@ -27,7 +27,7 @@ router.get("/items/count", (req, res) => {
 });
 
 router.get("/customers/search", (req, res) => {
-  const { q = "", limit = 50 } = req.query;
+  const { q = "", limit } = req.query;
   const term = q.toLowerCase();
   let rows = getDb()
     .prepare("SELECT data FROM customers")
@@ -38,7 +38,14 @@ router.get("/customers/search", (req, res) => {
       (c) => c.customer_name?.toLowerCase().includes(term) || c.mobile_no?.includes(term)
     );
   }
-  res.json(rows.slice(0, Number(limit) || 50));
+  // customerSearch.js's loadAllCustomers calls this with limit=0 meaning
+  // "no limit" (it wants the FULL customer list once, for instant local
+  // search) — `Number(limit) || 50` broke that: 0 is falsy in JS, so it
+  // silently capped to the first 50 cached customers (arbitrary SQLite
+  // order), making every customer beyond that unsearchable even though it
+  // was genuinely present in the local cache.
+  const n = limit === undefined ? 50 : Number(limit) || 0;
+  res.json(n > 0 ? rows.slice(0, n) : rows);
 });
 
 router.get("/payment-methods/:posProfile", (req, res) => {

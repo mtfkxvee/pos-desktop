@@ -33,6 +33,17 @@ async function pullItems(posProfile) {
     modified_after: state?.last_modified || null,
     start: 0,
     limit: 100000,
+    // Real get_items/get_items_bulk exclude variant SKUs by default (they're
+    // meant to stay hidden from the main catalog, surfaced only via the
+    // template's variant-picker dialog) — but that dialog's OWN offline
+    // fallback (ItemSelectionDialog.vue's getCachedVariants) reads from this
+    // SAME local items cache. Without include_variants here, variants were
+    // never cached at all: the variant picker would silently show zero
+    // options offline, leaving the cashier unable to add that item to the
+    // cart. rpc.js's get_items/get_items_bulk cache-first handlers filter
+    // variants back out for normal catalog browsing, matching real backend
+    // default behavior — this flag only controls what gets STORED locally.
+    include_variants: 1,
   });
   const rows = items || [];
 
@@ -158,6 +169,126 @@ async function pullPosProfile(posProfile) {
   return { fetched: !!data };
 }
 
+function setSettingValue(key, value) {
+  getDb()
+    .prepare(
+      "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    )
+    .run(key, JSON.stringify(value));
+}
+
+/**
+ * Company address for the receipt header. This outlet chain has MANY
+ * Address records all flagged is_your_company_address=1 (one per branch),
+ * none flagged is_primary_address=1 — so that generic flag combo (what the
+ * real "58 TEST" Print Format falls back to when doc.company_address is
+ * unset) can't disambiguate branches at all, it just grabs an arbitrary one.
+ * POS Profile itself carries the correct field directly: `company_address`
+ * (a Link to Address, e.g. profile "OCW" -> "X-SHA CIAWI-Shop") — this is
+ * the SAME field Sales Invoice inherits from its POS Profile when created
+ * online, so using it here matches real per-outlet behavior exactly. Cached
+ * per POS Profile (settings key `company_address:<profile>`) since
+ * different profiles/outlets have different addresses.
+ */
+async function pullCompanyAddress(posProfile) {
+  const row = getDb().prepare("SELECT data FROM pos_profiles WHERE name = ?").get(posProfile);
+  const profileAddress = row ? JSON.parse(row.data)?.pos_profile?.company_address : null;
+
+  const fields = ["name", "address_title", "address_line1", "address_line2", "city", "phone"];
+  let addr = null;
+
+  if (profileAddress) {
+    const doc = await callMethod("frappe.client.get", {
+      doctype: "Address",
+      name: profileAddress,
+    });
+    if (doc) {
+      addr = {
+        name: doc.name,
+        address_title: doc.address_title,
+        address_line1: doc.address_line1,
+        address_line2: doc.address_line2,
+        city: doc.city,
+        phone: doc.phone,
+      };
+    }
+  }
+
+  if (!addr) {
+    // Last-resort fallback only if the profile has no company_address set —
+    // arbitrary among branches, but better than nothing offline.
+    let rows = await callMethod("frappe.client.get_list", {
+      doctype: "Address",
+      filters: { is_your_company_address: 1, is_primary_address: 1 },
+      fields,
+      limit_page_length: 1,
+    });
+    if (!rows?.length) {
+      rows = await callMethod("frappe.client.get_list", {
+        doctype: "Address",
+        filters: { is_your_company_address: 1 },
+        fields,
+        limit_page_length: 1,
+      });
+    }
+    addr = rows?.[0] || null;
+  }
+
+  setSettingValue(`company_address:${posProfile}`, addr);
+  return { found: !!addr };
+}
+
+/**
+ * Fetches (and caches) the actual Print Format doc configured for this POS
+ * Profile (print_settings.print_format from get_pos_profile_data, already
+ * cached by pullPosProfile — must run after it). The receipt printer
+ * (main/printer.js) doesn't interpret this Jinja/HTML at runtime — ESC/POS
+ * has no concept of HTML/CSS — but its content/field-order was hand-ported
+ * to match this exact format. Cached raw so it's inspectable and so a
+ * future re-port has a concrete diff to work from if the outlet edits their
+ * format in ERP.
+ */
+async function pullPrintFormat(posProfile) {
+  const row = getDb().prepare("SELECT data FROM pos_profiles WHERE name = ?").get(posProfile);
+  const formatName = row ? JSON.parse(row.data)?.print_settings?.print_format : null;
+  if (!formatName) return { skipped: true };
+
+  const doc = await callMethod("frappe.client.get", {
+    doctype: "Print Format",
+    name: formatName,
+  });
+  setSettingValue(`print_format:${posProfile}`, {
+    name: formatName,
+    html: doc?.html || null,
+    fetched_at: new Date().toISOString(),
+  });
+  return { name: formatName, fetched: !!doc };
+}
+
+/**
+ * Pinned items/categories were the one thing on the item grid that wasn't
+ * cache-first — every load went through the generic online-first /rpc path
+ * (a real ping + round-trip), so the pinned row visibly popped in after the
+ * rest of the (already cache-first) item grid had already rendered. Caching
+ * the code lists here, read back instantly by rpc.js's OFFLINE_FALLBACK,
+ * fixes that — pinned items now render in the same pass as everything else.
+ */
+async function pullPinnedItems(posProfile) {
+  const codes = await callMethod("pos_next.api.pinned_items.get_pinned_items", {
+    pos_profile: posProfile,
+  });
+  setSettingValue(`pinned_items:${posProfile}`, codes || []);
+  return { count: (codes || []).length };
+}
+
+async function pullPinnedCategories(posProfile) {
+  const groups = await callMethod("pos_next.api.pinned_categories.get_pinned_categories", {
+    pos_profile: posProfile,
+  });
+  setSettingValue(`pinned_categories:${posProfile}`, groups || []);
+  return { count: (groups || []).length };
+}
+
 /**
  * Run one full pull cycle for the device's configured POS Profile. Called at
  * app start and on the scheduler interval (see scheduler.js) — never
@@ -170,15 +301,34 @@ async function pullAll() {
   }
   const posProfile = device.posProfile;
 
-  const [items, customers, taxes, paymentMethods, posProfileData] = await Promise.all([
+  const [items, customers, taxes, paymentMethods, posProfileData, pinnedItems, pinnedCategories] = await Promise.all([
     pullItems(posProfile),
     pullCustomers(posProfile),
     pullTaxes(posProfile),
     pullPaymentMethods(posProfile),
     pullPosProfile(posProfile),
+    pullPinnedItems(posProfile).catch((err) => ({ error: err.message })),
+    pullPinnedCategories(posProfile).catch((err) => ({ error: err.message })),
   ]);
 
-  return { items, customers, taxes, paymentMethods, posProfileData };
+  // Depends on pos_profiles already being cached above (reads the
+  // print_settings.print_format name back out of it).
+  const [printFormat, companyAddress] = await Promise.all([
+    pullPrintFormat(posProfile).catch((err) => ({ error: err.message })),
+    pullCompanyAddress(posProfile).catch((err) => ({ error: err.message })),
+  ]);
+
+  return {
+    items,
+    customers,
+    taxes,
+    paymentMethods,
+    posProfileData,
+    pinnedItems,
+    pinnedCategories,
+    printFormat,
+    companyAddress,
+  };
 }
 
 module.exports = {
@@ -188,4 +338,8 @@ module.exports = {
   pullTaxes,
   pullPaymentMethods,
   pullPosProfile,
+  pullPrintFormat,
+  pullCompanyAddress,
+  pullPinnedItems,
+  pullPinnedCategories,
 };

@@ -2,8 +2,11 @@ const express = require("express");
 const path = require("path");
 const { initDb, getDb } = require("./db/client");
 const {
-  loginAndProvision,
-  isDeviceSetup,
+  login,
+  logout,
+  isLoggedIn,
+  getActiveUser,
+  isDeviceConfigured,
   loadDeviceConfig,
 } = require("./auth/device-setup");
 const { pingServer } = require("./sync/ping");
@@ -69,19 +72,32 @@ function startServer({ port = 8871, dbPath } = {}) {
   });
 
   app.get("/auth/status", (req, res) => {
-    const configured = isDeviceSetup();
-    res.json({ configured, device: configured ? loadDeviceConfig() : null });
+    const configured = isDeviceConfigured();
+    const loggedIn = isLoggedIn();
+    res.json({
+      configured,
+      loggedIn,
+      device: configured ? loadDeviceConfig() : null,
+      username: loggedIn ? getActiveUser().username : null,
+    });
   });
 
-  app.post("/auth/setup", async (req, res) => {
+  // Per-cashier login. First-time-ever on this device, the request body also
+  // needs outletCode/posProfile/defaultWarehouse; every login after that
+  // (any cashier) just needs baseUrl(optional)/usr/pwd.
+  app.post("/auth/login", async (req, res) => {
     try {
-      const device = await loginAndProvision(req.body || {});
-      // Sync engine only makes sense once a device is configured.
+      const result = await login(req.body || {});
       startScheduler();
-      res.json({ ok: true, device });
+      res.json({ ok: true, ...result });
     } catch (err) {
       res.status(400).json({ ok: false, error: err.message });
     }
+  });
+
+  app.post("/auth/logout", (req, res) => {
+    logout();
+    res.json({ ok: true });
   });
 
   app.use("/invoices", invoicesRouter);
@@ -98,23 +114,55 @@ function startServer({ port = 8871, dbPath } = {}) {
     res.json({ online, queue: getQueueStatus() });
   });
 
+  // Full breakdown of what's cached and when — powers the Sync Status
+  // dialog so the cashier/support can see exactly how stale each type of
+  // local data is, not just a single vague "last synced" number.
+  app.get("/sync/overview", async (req, res) => {
+    const db = getDb();
+    const online = await pingServer();
+
+    const count = (table) => db.prepare(`SELECT COUNT(*) c FROM ${table}`).get().c;
+    const syncState = Object.fromEntries(
+      db.prepare("SELECT table_name, last_synced_at FROM sync_state").all()
+        .map((r) => [r.table_name, r.last_synced_at])
+    );
+    const latestFetchedAt = (table) => {
+      const row = db.prepare(`SELECT MAX(fetched_at) t FROM ${table}`).get();
+      return row?.t || null;
+    };
+
+    res.json({
+      online,
+      items: { count: count("items"), lastSyncedAt: syncState.items || null },
+      customers: { count: count("customers"), lastSyncedAt: syncState.customers || null },
+      taxes: { count: count("pos_taxes"), lastSyncedAt: latestFetchedAt("pos_taxes") },
+      paymentMethods: { count: count("payment_methods"), lastSyncedAt: latestFetchedAt("payment_methods") },
+      posProfiles: { count: count("pos_profiles") },
+      invoiceQueue: getQueueStatus(),
+      customerQueue: {
+        pending: db.prepare("SELECT COUNT(*) c FROM customer_queue WHERE status='pending'").get().c,
+        failed: db.prepare("SELECT COUNT(*) c FROM customer_queue WHERE status='failed'").get().c,
+      },
+    });
+  });
+
   // Manual sync trigger (e.g. a "sync now" button), in addition to the
   // automatic app-start + interval cycle from scheduler.js.
   app.post("/sync/run", async (req, res) => {
-    try {
-      const online = await pingServer();
-      if (!online) return res.json({ online: false });
-      const pull = await pullAll();
-      const push = await pushQueuedInvoices();
-      res.json({ online: true, pull, push });
-    } catch (err) {
-      res.status(500).json({ error: err.message });
-    }
+    const online = await pingServer();
+    if (!online) return res.json({ online: false });
+
+    // Pull and push are independent — a hiccup in one (e.g. a flaky
+    // connection dropping mid-request) shouldn't 500 the whole cycle and
+    // spam the renderer's error toast; report per-step errors instead.
+    const pull = await pullAll().catch((err) => ({ error: err.message }));
+    const push = await pushQueuedInvoices().catch((err) => ({ error: err.message }));
+    res.json({ online: true, pull, push });
   });
 
-  if (isDeviceSetup()) {
-    startScheduler();
-  }
+  // No auto-start here — activeUser is in-memory and always starts empty on
+  // process boot, so the scheduler only makes sense once /auth/login
+  // succeeds (see above).
 
   return new Promise((resolve, reject) => {
     const server = app.listen(port, "127.0.0.1", () => {

@@ -16,12 +16,24 @@ export const shiftState = ref({
 
 export function useShift() {
 	const { showError } = useToast()
-	// Check for existing open shift
+	// Check for existing open shift. The local server (server/routes/rpc.js)
+	// already mirrors every genuine answer into SQLite and serves THAT when
+	// offline/unreachable — so onSuccess below covers both the real and the
+	// offline-fallback case identically. onError is now only a rare
+	// last-resort (e.g. the local server itself isn't up yet); deliberately
+	// does NOT assume a shift is open on error — a previous bug here trusted
+	// stale browser localStorage on any failure, which could show a stale
+	// "shift open" with the wrong POS Profile instead of the shift-opening
+	// screen. When we can't reliably determine shift status, the safe
+	// default is "no shift" (shows the opening dialog), not a guess.
 	const checkOpeningShift = createResource({
 		url: "pos_next.api.shifts.check_opening_shift",
 		auto: false,
 		onSuccess(data) {
-			if (data) {
+			// Require an actual pos_opening_shift, not just any truthy value —
+			// a bare `{}` (seen from a response-parsing edge case, see
+			// server/frappe-client.js) must never be treated as "shift open".
+			if (data?.pos_opening_shift) {
 				// Compute initial elapsed time using server timestamps
 				// (avoids timezone mismatch between server and browser)
 				let initialElapsedMs = 0
@@ -40,15 +52,6 @@ export function useShift() {
 					_initialElapsedMs: initialElapsedMs,
 					_receivedAt: Date.now(),
 				}
-				// Store in localStorage for offline support
-				localStorage.setItem(
-					"pos_shift_data",
-					JSON.stringify({
-						...data,
-						_initialElapsedMs: initialElapsedMs,
-						_receivedAt: Date.now(),
-					}),
-				)
 			} else {
 				shiftState.value = {
 					pos_opening_shift: null,
@@ -58,28 +61,10 @@ export function useShift() {
 					_initialElapsedMs: 0,
 					_receivedAt: 0,
 				}
-				localStorage.removeItem("pos_shift_data")
 			}
 		},
 		onError(error) {
 			console.error("Error checking opening shift:", error)
-			// Try to load from localStorage
-			const cachedData = localStorage.getItem("pos_shift_data")
-			if (cachedData) {
-				try {
-					const data = JSON.parse(cachedData)
-					shiftState.value = {
-						pos_opening_shift: data.pos_opening_shift,
-						pos_profile: data.pos_profile,
-						company: data.company,
-						isOpen: true,
-						_initialElapsedMs: data._initialElapsedMs || 0,
-						_receivedAt: data._receivedAt || Date.now(),
-					}
-				} catch (e) {
-					console.error("Error parsing cached shift data:", e)
-				}
-			}
 		},
 	})
 
@@ -108,15 +93,8 @@ export function useShift() {
 				_initialElapsedMs: 0,
 				_receivedAt: Date.now(),
 			}
-			// Store in localStorage
-			localStorage.setItem(
-				"pos_shift_data",
-				JSON.stringify({
-					...data,
-					_initialElapsedMs: 0,
-					_receivedAt: Date.now(),
-				}),
-			)
+			// Local server already mirrored this into SQLite (server/routes/rpc.js,
+			// SHIFT_MIRROR_METHODS) — no renderer-side persistence needed.
 		},
 		onError(error) {
 			console.error("Error creating opening shift:", error)
@@ -148,7 +126,7 @@ export function useShift() {
 				_initialElapsedMs: 0,
 				_receivedAt: 0,
 			}
-			localStorage.removeItem("pos_shift_data")
+			// Local server already cleared its SQLite mirror (server/routes/rpc.js).
 		},
 		onError(error) {
 			console.error("Error submitting closing shift:", error)

@@ -38,6 +38,7 @@ export const saveOfflineInvoice = (data) => offlineWorker.saveOfflineInvoice(dat
 export const getOfflineInvoices = () => offlineWorker.getOfflineInvoices();
 export const getOfflineInvoiceCount = () => offlineWorker.getOfflineInvoiceCount();
 export const deleteOfflineInvoice = (id) => offlineWorker.deleteOfflineInvoice(id);
+export const retryOfflineInvoice = (id) => offlineWorker.retryOfflineInvoice(id);
 export const syncOfflineInvoices = () => offlineWorker.syncOfflineInvoices();
 
 export async function getOfflineInvoicesForHistory() {

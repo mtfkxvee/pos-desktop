@@ -87,6 +87,7 @@ router.get("/queue", (req, res) => {
       data: JSON.parse(r.payload).invoice,
       timestamp: new Date(r.created_at).getTime(),
       synced: false,
+      status: r.status, // 'pending' (will auto-retry) or 'failed' (retries exhausted, see push.js)
       retry_count: r.retry_count,
       error: r.last_error,
     }))
@@ -107,6 +108,25 @@ router.post("/queue", (req, res) => {
 
 router.delete("/queue/:id", (req, res) => {
   getDb().prepare("DELETE FROM invoice_queue WHERE id = ?").run(req.params.id);
+  res.json({ success: true });
+});
+
+// Re-queue a permanently-failed invoice (status='failed', see push.js's
+// MAX_RETRY_COUNT) for another sync attempt. pushQueuedInvoices() only ever
+// looks at status='pending' rows, so a failed one is otherwise stuck forever
+// with no path back — this is the manual "Retry Now" action surfaced in the
+// Offline Invoices dialog. Resets retry_count so it gets the full 3 attempts
+// again rather than being re-marked failed on its very next miss.
+router.post("/queue/:id/retry", (req, res) => {
+  const db = getDb();
+  const row = db.prepare("SELECT * FROM invoice_queue WHERE id = ?").get(req.params.id);
+  if (!row) return res.status(404).json({ error: "Invoice tidak ditemukan di antrian" });
+  if (row.status === "synced") {
+    return res.status(400).json({ error: "Invoice ini sudah tersinkron" });
+  }
+  db.prepare(
+    "UPDATE invoice_queue SET status='pending', retry_count=0, last_error=NULL, updated_at=? WHERE id=?"
+  ).run(new Date().toISOString(), req.params.id);
   res.json({ success: true });
 });
 
