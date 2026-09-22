@@ -15,7 +15,6 @@
  */
 import { call } from "@/utils/apiWrapper"
 import { logger } from "@/utils/logger"
-import { getCachedCompanyAddress } from "@/utils/offline/cache"
 
 const log = logger.create("PrintInvoice")
 const BASE = "http://127.0.0.1:8871"
@@ -46,8 +45,10 @@ export async function printInvoice(invoiceData, printFormat = null, letterhead =
     throw new Error("Invalid invoice data")
   }
   try {
-    const companyAddress = await getCachedCompanyAddress()
-    await sendToPrinter("/print/receipt", { invoice: invoiceData, companyAddress })
+    // Company address is fetched server-side from the cache pulled by
+    // server/sync/pull.js's pullCompanyAddress() — no need to source or
+    // send it from here.
+    await sendToPrinter("/print/receipt", { invoice: invoiceData })
     return true
   } catch (error) {
     log.error("Error printing receipt:", error)
@@ -77,8 +78,15 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
           invoice_name: invoiceName,
         })
         if (loyaltyData) {
-          invoiceDoc._earned_loyalty_points = loyaltyData.earned_points
-          invoiceDoc._total_loyalty_points = loyaltyData.total_points
+          // get_invoice_loyalty_points computes earned points from the actual
+          // Loyalty Point Entry records tied to this invoice — more precise
+          // than the raw doc field, and the only source for the running
+          // balance. main/printer.js reads loyalty_points/loyalty_points_balance
+          // (NOT earned_points/total_points) — these names must match.
+          if (!invoiceDoc.redeem_loyalty_points) {
+            invoiceDoc.loyalty_points = loyaltyData.earned_points
+          }
+          invoiceDoc.loyalty_points_balance = loyaltyData.total_points
         }
       } catch (err) {
         log.warn("Could not fetch loyalty points for print:", err)
@@ -103,6 +111,27 @@ export async function printShiftClosing(closingData, paperSize = "80mm") {
     return true
   } catch (error) {
     log.error("Error printing shift closing:", error)
+    throw error
+  }
+}
+
+/**
+ * Print a single cup/kitchen label via ESC/POS.
+ *
+ * Desktop build replacement for the old app's Web Bluetooth/WebUSB label
+ * printing (see CupLabelDialog.vue) — same "one call per physical label"
+ * shape, just routed through the configured receipt printer instead.
+ * @param {string} itemName
+ * @param {string} remarks
+ * @param {number} copyNum - 1-based index of this label among totalCopies
+ * @param {number} totalCopies
+ */
+export async function printCupLabel(itemName, remarks, copyNum = 1, totalCopies = 1) {
+  try {
+    await sendToPrinter("/print/cup-label", { itemName, remarks, copyNum, totalCopies })
+    return true
+  } catch (error) {
+    log.error("Error printing cup label:", error)
     throw error
   }
 }
