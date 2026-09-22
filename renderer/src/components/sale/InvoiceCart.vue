@@ -442,6 +442,40 @@
 			</div>
 		</div>
 
+		<!-- Offer Verification Warning -->
+		<!--
+			cartStore.offerProcessingState.error is only non-null once
+			auto-retries (see triggerOfferProcessing in posCart.js) are fully
+			exhausted — happens when the server is flaky enough that offer
+			evaluation keeps failing (502/503/timeouts). Without this banner
+			the cart total looked completely normal even though a promo may
+			not actually have been applied, and Checkout stayed clickable — a
+			silent full-price overcharge with zero indication anything was
+			wrong. Checkout intentionally stays enabled here (not blocked) so
+			a real server outage doesn't halt sales entirely; the cashier just
+			needs to see this and can retry or proceed knowingly.
+		-->
+		<div
+			v-if="items.length > 0 && cartStore.offerProcessingState.error && !cartStore.offerProcessingState.isProcessing"
+			class="mx-2 mt-1.5 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 px-2.5 py-2"
+		>
+			<svg class="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+				<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+			</svg>
+			<div class="flex-1 min-w-0">
+				<p class="text-[11px] font-semibold text-amber-900">
+					{{ __("Gagal memeriksa promo — harga mungkin belum termasuk diskon") }}
+				</p>
+				<button
+					type="button"
+					@click="cartStore.forceRefreshOffers()"
+					class="text-[11px] font-bold text-amber-700 underline hover:text-amber-900 mt-0.5"
+				>
+					{{ __("Coba lagi") }}
+				</button>
+			</div>
+		</div>
+
 		<!-- Cart Items -->
 		<div ref="cartScrollContainer" class="flex-1 overflow-y-auto p-0.5 sm:p-1.5 bg-gray-50">
 			<div
@@ -1076,29 +1110,38 @@
 				<button
 					type="button"
 					@click="handleProceedToPayment"
-					:disabled="items.length === 0"
+					:disabled="items.length === 0 || checkoutBlockedByOfferCheck"
 					:class="[
 						'flex-1 py-2.5 px-3 rounded-lg font-bold text-xs text-white transition-all flex items-center justify-center touch-manipulation',
-						items.length === 0
+						items.length === 0 || checkoutBlockedByOfferCheck
 							? 'bg-gray-300 cursor-not-allowed'
 							: 'bg-blue-600 hover:bg-blue-700 active:bg-blue-800 shadow-lg hover:shadow-xl active:scale-[0.98]',
 					]"
 					:aria-label="__('Proceed to payment')"
 				>
-					<svg
-						class="w-4 h-4 me-1.5"
-						fill="none"
-						stroke="currentColor"
-						viewBox="0 0 24 24"
-						stroke-width="2"
-					>
-						<path
-							stroke-linecap="round"
-							stroke-linejoin="round"
-							d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
-						/>
-					</svg>
-					<span>{{ __("Checkout") }}</span>
+					<template v-if="checkoutBlockedByOfferCheck">
+						<svg class="w-3.5 h-3.5 me-1.5 animate-spin" fill="none" viewBox="0 0 24 24">
+							<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+							<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+						</svg>
+						<span>{{ __("Memeriksa promo...") }}</span>
+					</template>
+					<template v-else>
+						<svg
+							class="w-4 h-4 me-1.5"
+							fill="none"
+							stroke="currentColor"
+							viewBox="0 0 24 24"
+							stroke-width="2"
+						>
+							<path
+								stroke-linecap="round"
+								stroke-linejoin="round"
+								d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"
+							/>
+						</svg>
+						<span>{{ __("Checkout") }}</span>
+					</template>
 				</button>
 
 				<!-- Hold Order Button (Secondary - 50% width) -->
@@ -1260,6 +1303,36 @@ const emit = defineEmits([
 	// "create-sales-order", // () - Create Sales Order // Removed as per instruction
 ])
 
+// Checkout is disabled while cartStore.offerProcessingState.isProcessing is
+// true (see the Checkout button below) so a promo can't finish applying
+// mid-payment. That state is driven by triggerOfferProcessing's retry/
+// backoff loop in posCart.js, nominally bounded to ~20s worst case — but
+// observed live under a sustained full server outage, isProcessing stayed
+// true well past that budget (repeated overlapping retry attempts). Rather
+// than fully chase that down live against a broken remote server, this is a
+// hard outer ceiling: Checkout is guaranteed to unblock within
+// OFFER_CHECK_MAX_BLOCK_MS regardless of what the retry internals are doing,
+// so a misbehaving retry chain can never fully strand the cashier — "POS
+// tetap bisa jalan normal" as an invariant, independent of that logic.
+const OFFER_CHECK_MAX_BLOCK_MS = 8000
+const checkoutBlockedByOfferCheck = ref(false)
+let offerCheckDisableTimer = null
+watch(
+	() => cartStore.offerProcessingState.isProcessing,
+	(isProcessing) => {
+		clearTimeout(offerCheckDisableTimer)
+		if (isProcessing) {
+			checkoutBlockedByOfferCheck.value = true
+			offerCheckDisableTimer = setTimeout(() => {
+				checkoutBlockedByOfferCheck.value = false
+			}, OFFER_CHECK_MAX_BLOCK_MS)
+		} else {
+			checkoutBlockedByOfferCheck.value = false
+		}
+	},
+)
+onBeforeUnmount(() => clearTimeout(offerCheckDisableTimer))
+
 /**
  * ============================================================================
  * REACTIVE STATE
@@ -1272,8 +1345,12 @@ const customerSearchContainer = ref(null) // Ref to search container for click-o
 const customerSearchFocused = ref(false) // Track if search input is focused
 // Use Pinia store for allCustomers (shared with CustomerDialog, synced on customer creation)
 const allCustomers = computed(() => customerSearchStore.allCustomers)
+// Gate on "has the load settled" rather than "did it return results" — an
+// empty result from a failed/retrying fetch used to leave this permanently
+// false (search box disabled forever) with no way to recover short of an
+// app restart. See loadAttempted in stores/customerSearch.js.
 const customersLoaded = computed(
-	() => customerSearchStore.allCustomers.length > 0,
+	() => customerSearchStore.allCustomers.length > 0 || customerSearchStore.loadAttempted,
 )
 const selectedIndex = ref(-1) // Keyboard navigation index for search results
 const availableGiftCards = ref([]) // Available gift cards for current customer
@@ -1307,9 +1384,13 @@ if (props.posProfile) {
 }
 
 // Load offers on component init (uses shared store method to prevent duplicate fetches)
-// ensureOffersFetched handles both online/offline cases and caching
+// ensureOffersFetched handles both online/offline cases and caching. It can
+// now reject (see posOffers.js) instead of always resolving, so this
+// fire-and-forget call needs an explicit catch — the real retry for a
+// failed fetch happens later via triggerOfferProcessing when the cart
+// actually changes, this call is just an early best-effort prewarm.
 if (props.posProfile) {
-	offersStore.ensureOffersFetched(props.posProfile)
+	offersStore.ensureOffersFetched(props.posProfile).catch(() => {})
 }
 
 /**

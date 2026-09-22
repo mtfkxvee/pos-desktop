@@ -1222,6 +1222,11 @@ const loadingCredit = ref(false)
 // Loyalty state
 const loyaltyPointInfo = ref({ loyalty_points: 0 })
 const loadingLoyalty = ref(false)
+// In-flight loyaltyPointsResource.fetch() promise, if any — awaited by
+// completePayment() so a fast cashier can't finish the sale before
+// collection_factor arrives, which would silently zero out earned points
+// (see earnedLoyaltyPoints below). null once settled.
+let loyaltyFetchPromise = null
 const pointsToRedeem = ref(0)
 const isPointsRedemptionActive = ref(false)
 const showLoyaltyConfirm = ref(false)
@@ -1230,6 +1235,42 @@ const maxRedeemablePoints = computed(() => {
 	const available = loyaltyPointInfo.value?.loyalty_points || 0
 	const convFactor = loyaltyPointInfo.value?.conversion_factor || 1
 	return Math.min(available, Math.floor(props.grandTotal / convFactor))
+})
+
+const isRedeemingLoyaltyPoints = computed(
+	() => isPointsRedemptionActive.value && redeemedLoyaltyAmount.value > 0,
+)
+
+// Points earned on THIS sale (not redemption). ERPNext computes this
+// server-side on submit using the customer's tier-resolved collection_factor
+// (points earned = floor(eligible_amount / collection_factor)) — that same
+// tier-resolved value is returned by get_loyalty_program_details_with_points
+// when online. Offline (or when that call fails), loyaltyInfoFromCache()
+// supplies a best-effort collection_factor instead (the base/lowest-tier
+// rate cached in bootstrap.py — exact for a Single Tier Program, an
+// approximation for a genuinely multi-tier one since the customer's actual
+// tier isn't knowable without a live lookup).
+const earnedLoyaltyPoints = computed(() => {
+	if (isRedeemingLoyaltyPoints.value) return 0
+	if (!loyaltyPointInfo.value?.loyalty_program) return 0
+	const collectionFactor = Number(loyaltyPointInfo.value?.collection_factor) || 0
+	if (collectionFactor <= 0) return 0
+	return Math.floor((props.grandTotal || 0) / collectionFactor)
+})
+
+// Running "Total Poin" balance for the receipt. get_loyalty_program_details_with_points
+// (loyaltyPointInfo, fetched onMounted) already returns the customer's
+// CURRENT balance as its own `loyalty_points` field (confirmed against a
+// real customer: {..., loyalty_points: 58, collection_factor: 50000, ...} —
+// 58 was their balance BEFORE this sale) — so the post-sale balance is just
+// that plus/minus this transaction's effect, no extra API call needed. null
+// when there's no loyalty program on the customer at all, so the receipt
+// doesn't print a "Total Poin: 0" line for a non-member sale.
+const loyaltyPointsBalanceAfter = computed(() => {
+	if (!loyaltyPointInfo.value?.loyalty_program) return null
+	const current = Number(loyaltyPointInfo.value?.loyalty_points) || 0
+	if (isRedeemingLoyaltyPoints.value) return Math.max(0, current - pointsToRedeem.value)
+	return current + earnedLoyaltyPoints.value
 })
 
 function activateLoyaltyRedemption() {
@@ -1459,6 +1500,30 @@ const customerBalanceResource = createResource({
 		loadingCredit.value = false
 	},
 })
+// Builds loyaltyPointInfo entirely from the settings payload cached at
+// shift-open (survives offline AND a flaky/failed live request — see
+// bootstrap.py's loyalty_programs_cf_map / loyalty_programs_collection_
+// factor_map, persisted to localStorage by posSettings.js's loadSettings).
+// Used both when props.isOffline is genuinely true AND as the fallback when
+// the online fetch below fails — previously only the former existed, so a
+// flaky-but-not-detected-offline moment (the same "ambiguous middle zone"
+// fixed elsewhere today for promos) silently zeroed out loyalty entirely
+// with no retry and no cache fallback.
+function loyaltyInfoFromCache() {
+	const customerLp = props.customer?.loyalty_program || null
+	if (!customerLp) return { loyalty_points: 0 }
+	const conversionFactor =
+		settingsStore.loyaltyProgramsCfMap[customerLp] || settingsStore.loyaltyConversionFactor
+	const collectionFactor =
+		settingsStore.loyaltyProgramsCollectionFactorMap[customerLp] || 0
+	return {
+		loyalty_points: props.customer?.loyalty_points || 0,
+		loyalty_program: customerLp,
+		conversion_factor: conversionFactor,
+		collection_factor: collectionFactor,
+	}
+}
+
 // Loyalty Points resource
 const loyaltyPointsResource = createResource({
 	url: "erpnext.accounts.doctype.loyalty_program.loyalty_program.get_loyalty_program_details_with_points",
@@ -1475,12 +1540,12 @@ const loyaltyPointsResource = createResource({
 	onSuccess(data) {
 		const result = data?.message || data || null
 		log.debug("[PaymentDialog] Loyalty info loaded:", result)
-		loyaltyPointInfo.value = result || { loyalty_points: 0 }
+		loyaltyPointInfo.value = result || loyaltyInfoFromCache()
 		loadingLoyalty.value = false
 	},
 	onError(error) {
-		log.error("[PaymentDialog] Error loading loyalty points:", error)
-		loyaltyPointInfo.value = { loyalty_points: 0 }
+		log.error("[PaymentDialog] Error loading loyalty points, falling back to cache:", error)
+		loyaltyPointInfo.value = loyaltyInfoFromCache()
 		loadingLoyalty.value = false
 	},
 })
@@ -2164,20 +2229,12 @@ watch(show, (newVal) => {
 		if (props.customer && props.company) {
 			if (props.isOffline) {
 				log.debug("[PaymentDialog] Using offline cached loyalty points")
-				const customerLp = props.customer?.loyalty_program || null
-				const cfFromMap = customerLp
-					? (settingsStore.loyaltyProgramsCfMap[customerLp] || 0)
-					: 0
-				loyaltyPointInfo.value = {
-					loyalty_points: props.customer.loyalty_points || 0,
-					loyalty_program: customerLp,
-					conversion_factor:
-						cfFromMap ||
-						settingsStore.loyaltyConversionFactor,
-				}
+				loyaltyPointInfo.value = loyaltyInfoFromCache()
 			} else {
 				loadingLoyalty.value = true
-				loyaltyPointsResource.fetch()
+				loyaltyFetchPromise = loyaltyPointsResource.fetch().finally(() => {
+					loyaltyFetchPromise = null
+				})
 			}
 		}
 
@@ -2459,7 +2516,7 @@ function clearAll() {
 	customAmount.value = ""
 }
 
-function completePayment() {
+async function completePayment() {
 	log.debug("[PaymentDialog] Complete payment called:", {
 		canComplete: canComplete.value,
 		totalPaid: totalPaid.value,
@@ -2478,6 +2535,29 @@ function completePayment() {
 		log.warn("[PaymentDialog] Cannot complete - validation failed")
 		return
 	}
+
+	// A fast cashier can hit "complete" before the loyalty points fetch
+	// triggered on dialog-open (see onMounted) has resolved — without this,
+	// collection_factor isn't there yet and earnedLoyaltyPoints silently
+	// computes 0, so the receipt is missing "Poin Didapat" even for a
+	// qualifying sale. Wait for it (briefly, it's already in flight).
+	if (loyaltyFetchPromise) {
+		try {
+			await loyaltyFetchPromise
+		} catch {
+			// onError already reset loyaltyPointInfo to a safe zero default
+		}
+	}
+
+	log.debug("[PaymentDialog] Loyalty calc at completion:", {
+		customerName: props.customer?.name || props.customer,
+		customerLoyaltyProgram: props.customer?.loyalty_program,
+		isOfflineProp: props.isOffline,
+		loyaltyPointInfo: loyaltyPointInfo.value,
+		isRedeeming: isRedeemingLoyaltyPoints.value,
+		earnedLoyaltyPoints: earnedLoyaltyPoints.value,
+		grandTotal: props.grandTotal,
+	})
 
 	// Calculate if this is a partial payment (considering write-off)
 	const effectivePaid = totalPaid.value + writeOffAmount.value
@@ -2498,14 +2578,17 @@ function completePayment() {
 		write_off_amount: writeOffAmount.value,
 		is_write_off: writeOffAmount.value > 0,
 		// Loyalty Points data
-		redeem_loyalty_points:
-			isPointsRedemptionActive.value && redeemedLoyaltyAmount.value > 0 ? 1 : 0,
-		loyalty_points: isPointsRedemptionActive.value ? pointsToRedeem.value : 0,
-		loyalty_amount: isPointsRedemptionActive.value
+		redeem_loyalty_points: isRedeemingLoyaltyPoints.value ? 1 : 0,
+		loyalty_points: isRedeemingLoyaltyPoints.value
+			? pointsToRedeem.value
+			: earnedLoyaltyPoints.value,
+		loyalty_amount: isRedeemingLoyaltyPoints.value
 			? redeemedLoyaltyAmount.value
 			: 0,
+		loyalty_points_balance: loyaltyPointsBalanceAfter.value,
 		loyalty_program:
-			isPointsRedemptionActive.value && loyaltyPointInfo.value
+			(isRedeemingLoyaltyPoints.value || earnedLoyaltyPoints.value > 0) &&
+			loyaltyPointInfo.value
 				? loyaltyPointInfo.value.loyalty_program
 				: null,
 		loyalty_redemption_account: isPointsRedemptionActive.value

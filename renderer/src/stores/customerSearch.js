@@ -12,6 +12,15 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	const allCustomers = ref([])
 	const searchTerm = ref("")
 	const loading = ref(false)
+	// True once an initial load attempt has SETTLED — success or failure —
+	// as opposed to allCustomers.length > 0, which InvoiceCart.vue used to
+	// gate its customer search box on directly. That conflated "no
+	// customers exist yet" with "the fetch failed", so a single flaky
+	// server response (502/503/timeout) on first load left the search box
+	// permanently disabled for the rest of the session, with no retry and
+	// no way to recover short of restarting the app.
+	const loadAttempted = ref(false)
+	const loadRetryCount = ref(0)
 	const selectedIndex = ref(-1)
 	const recentSearches = ref([])
 	const frequentCustomers = ref([])
@@ -199,6 +208,18 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 	// Actions
 
+	// In-flight loadAllCustomers() call, if any — de-dupes concurrent callers
+	// onto the SAME attempt instead of racing separate fetches. This started
+	// mattering once loadAllCustomers got a second caller (POSSale.vue's
+	// initPOS now prewarms it at shift-open, in addition to InvoiceCart.vue's
+	// own on-mount call) — without this guard, two concurrent calls could
+	// both see allCustomers still empty, both proceed, and each independently
+	// retry-loop on failure, corrupting the shared loadRetryCount/loadAttempted
+	// bookkeeping and leaving the customer search box disabled far longer
+	// than the intended ~15s retry budget (observed live: still disabled and
+	// flapping in/out of the DOM after 30s+).
+	let loadPromise = null
+
 	async function loadAllCustomers(posProfile, forceReload = false) {
 		if (!posProfile) {
 			return
@@ -209,6 +230,19 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			return
 		}
 
+		if (loadPromise) {
+			return loadPromise
+		}
+
+		loadPromise = loadAllCustomersImpl(posProfile)
+		try {
+			return await loadPromise
+		} finally {
+			loadPromise = null
+		}
+	}
+
+	async function loadAllCustomersImpl(posProfile) {
 		loading.value = true
 		try {
 			// Try to get from worker cache first (no limit — all cached customers)
@@ -241,9 +275,27 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 			// Clear caches when new data is loaded
 			searchIndex.value.clear()
 			resultCache.value.clear()
+			loadRetryCount.value = 0
+			loadAttempted.value = true
 		} catch (error) {
 			log.error("Error loading customers:", error)
 			allCustomers.value = []
+
+			// Retry a flaky failure a few times before giving up — a
+			// transient 502/503 shouldn't require an app restart to recover
+			// from. Bounded so a genuinely dead server doesn't retry forever.
+			const MAX_LOAD_RETRIES = 5
+			if (loadRetryCount.value < MAX_LOAD_RETRIES) {
+				loadRetryCount.value++
+				const delay = Math.min(1000 * loadRetryCount.value, 5000)
+				setTimeout(() => loadAllCustomers(posProfile, true), delay)
+			} else {
+				// Give up retrying, but still mark the attempt as settled so
+				// the search UI unblocks — the cashier can keep working
+				// (WALK IN CUST default, manual customer search on demand)
+				// instead of being stuck on a permanently-disabled input.
+				loadAttempted.value = true
+			}
 		} finally {
 			loading.value = false
 		}
@@ -391,6 +443,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		allCustomers,
 		searchTerm,
 		loading,
+		loadAttempted,
 		selectedIndex,
 		recentSearches,
 		frequentCustomers,

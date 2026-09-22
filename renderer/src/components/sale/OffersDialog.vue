@@ -11,6 +11,35 @@
 					<p class="mt-3 text-sm text-gray-500">{{ __('Loading offers...') }}</p>
 				</div>
 
+				<!--
+					Fetch-Failed State — offersStore.hasFetched only flips to true on
+					a REAL success now (see posOffers.js: it used to also flip true
+					on failure "to prevent infinite retries", which made a single
+					502 permanently disable retries and leave the loading spinner
+					above stuck forever, since `loading` depends on !hasFetched).
+					With that fixed, hasFetched can legitimately stay false for the
+					whole duration of the retry/backoff loop AND after it gives up —
+					so without this branch, a cashier facing a flaky server would
+					stare at "Loading offers..." forever with no way to tell it had
+					actually failed, and no way to retry.
+				-->
+				<div v-else-if="fetchFailed" class="py-8 text-center">
+					<div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-amber-100">
+						<svg class="h-8 w-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+						</svg>
+					</div>
+					<h3 class="mt-4 text-sm font-medium text-gray-900">{{ __('Failed to load offers') }}</h3>
+					<p class="mt-2 text-xs text-gray-500">{{ __('Could not reach the server. Check your connection and try again.') }}</p>
+					<button
+						type="button"
+						@click="cartStore.forceRefreshOffers()"
+						class="mt-4 px-4 py-2 rounded-lg text-sm font-semibold bg-green-600 hover:bg-green-700 text-white transition-colors"
+					>
+						{{ __('Try Again') }}
+					</button>
+				</div>
+
 				<!-- Empty State -->
 				<div v-else-if="eligibleOffers.length === 0" class="py-12 text-center">
 					<div class="mx-auto flex items-center justify-center h-16 w-16 rounded-full bg-gray-100">
@@ -177,13 +206,23 @@
 							<button
 								v-else-if="offer.validate_applied_rule"
 								type="button"
-								class="w-full py-2 px-4 rounded-lg font-semibold text-sm bg-orange-500 hover:bg-orange-600 active:bg-orange-700 text-white flex items-center justify-center gap-2 transition-colors"
-								@click="$emit('apply-offer', offer)"
+								:disabled="applyingOfferName === offer.name"
+								class="w-full py-2 px-4 rounded-lg font-semibold text-sm bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:opacity-70 disabled:cursor-not-allowed text-white flex items-center justify-center gap-2 transition-colors"
+								@click="handleApplyClick(offer)"
 							>
-								<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"/>
-								</svg>
-								{{ __('Tap to Apply') }}
+								<template v-if="applyingOfferName === offer.name">
+									<svg class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+										<circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+										<path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+									</svg>
+									{{ __('Applying...') }}
+								</template>
+								<template v-else>
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 5v2m0 4v2m0 4v2M5 5a2 2 0 00-2 2v3a2 2 0 110 4v3a2 2 0 002 2h14a2 2 0 002-2v-3a2 2 0 110-4V7a2 2 0 00-2-2H5z"/>
+									</svg>
+									{{ __('Tap to Apply') }}
+								</template>
 							</button>
 							<!-- Auto-apply -->
 							<div
@@ -212,6 +251,7 @@
 </template>
 
 <script setup>
+import { usePOSCartStore } from "@/stores/posCart"
 import { usePOSOffersStore } from "@/stores/posOffers"
 import {
 	DEFAULT_CURRENCY,
@@ -223,6 +263,7 @@ import { computed, ref, watch } from "vue"
 
 // Use Pinia stores
 const offersStore = usePOSOffersStore()
+const cartStore = usePOSCartStore()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -248,6 +289,29 @@ const props = defineProps({
 const emit = defineEmits(["update:modelValue", "apply-offer"])
 
 const show = ref(props.modelValue)
+
+// Per-offer "applying" spinner for the "Tap to Apply" button. The parent
+// (POSSale.vue) holds a template ref to this component and calls
+// resetApplyingState() on every failure path inside cartStore.applyOffer()
+// (network error, offline, cart no longer eligible, etc.) — that method
+// didn't exist here at all, so every one of those failure paths threw
+// "resetApplyingState is not a function" instead of just showing the error
+// toast, which also meant the button never got any visual feedback while
+// the request was in flight to begin with. Tracking it properly here fixes
+// both: a real spinner during the request, and a working reset on failure.
+const applyingOfferName = ref(null)
+
+function handleApplyClick(offer) {
+	if (applyingOfferName.value) return // ignore taps while one is in flight
+	applyingOfferName.value = offer.name
+	emit("apply-offer", offer)
+}
+
+defineExpose({
+	resetApplyingState: () => {
+		applyingOfferName.value = null
+	},
+})
 const appliedOfferCodes = computed(() => {
 	return new Set(
 		(props.appliedOffers || []).map((entry) => entry?.code).filter(Boolean),
@@ -257,9 +321,28 @@ const appliedOfferCodes = computed(() => {
 // Use ALL eligible offers from store (includes both auto and manual offers)
 const eligibleOffers = computed(() => offersStore.allEligibleOffersSorted)
 
-// Loading state - check if offers are being loaded
+// Loading state - check if offers are still being fetched (incl. the
+// retry/backoff loop under a flaky server — see triggerOfferProcessing in
+// posCart.js). isProcessing reflects that ongoing attempt; hasFetched alone
+// used to be enough to detect "done" back when a failed fetch immediately
+// latched hasFetched=true, but that's no longer true (see posOffers.js), so
+// checking isProcessing too avoids the spinner clearing mid-retry only to
+// flip back to it on the next attempt.
 const loading = computed(() => {
-	return !offersStore.hasFetched && eligibleOffers.value.length === 0
+	if (offersStore.hasFetched) return false
+	if (eligibleOffers.value.length > 0) return false
+	return cartStore.offerProcessingState.isProcessing || !cartStore.offerProcessingState.error
+})
+
+// Retries genuinely exhausted with nothing to show — surface an explicit
+// failure + retry action instead of leaving the spinner above stuck forever.
+const fetchFailed = computed(() => {
+	return (
+		!offersStore.hasFetched &&
+		eligibleOffers.value.length === 0 &&
+		!cartStore.offerProcessingState.isProcessing &&
+		!!cartStore.offerProcessingState.error
+	)
 })
 
 watch(

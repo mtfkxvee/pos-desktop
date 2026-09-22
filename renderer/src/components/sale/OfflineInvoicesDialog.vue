@@ -96,12 +96,33 @@
 										{{ resolvedCustomerName(invoice) }}
 									</h4>
 									<span
-										v-if="invoice.retry_count > 0"
-										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-red-100 text-red-700 rounded-full flex-shrink-0"
+										v-if="isPermanentlyFailed(invoice)"
+										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-red-100 text-red-700 rounded-full flex-shrink-0 font-semibold"
 									>
-										{{ __('{0} failed', [invoice.retry_count]) }}
+										{{ __('Failed — needs attention') }}
+									</span>
+									<span
+										v-else-if="invoice.retry_count > 0"
+										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-amber-100 text-amber-700 rounded-full flex-shrink-0"
+									>
+										{{ __('{0} retries so far', [invoice.retry_count]) }}
 									</span>
 								</div>
+								<!--
+									invoice.error is the raw last_error from invoice_queue (see
+									server/sync/push.js's handleSyncFailure) — previously
+									fetched but never rendered anywhere, so a cashier had no way
+									to tell "just needs a network retry" apart from "this will
+									never sync without an admin fixing something server-side"
+									(e.g. a missing default account on a Mode of Payment —
+									genuinely needs ERPNext config, not a retry).
+								-->
+								<p
+									v-if="isPermanentlyFailed(invoice) && invoice.error"
+									class="mt-1 text-xs text-red-600 break-words"
+								>
+									{{ invoice.error }}
+								</p>
 								<div class="mt-2 flex flex-col gap-1 text-xs sm:text-sm text-gray-600">
 									<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
 										<span>{{ __('{0} items', [invoice.data.items?.length || 0]) }}</span>
@@ -125,6 +146,16 @@
 								</div>
 							</div>
 							<div class="flex items-center justify-end sm:justify-start gap-1 sm:gap-2">
+								<button
+									v-if="isPermanentlyFailed(invoice) && !isOffline"
+									@click="retryInvoice(invoice)"
+									class="p-1.5 sm:p-2 hover:bg-blue-50 rounded-lg transition-colors touch-manipulation"
+									:title="__('Retry sync')"
+								>
+									<svg class="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+									</svg>
+								</button>
 								<button
 									@click="printInvoice(invoice)"
 									class="p-1.5 sm:p-2 hover:bg-green-50 rounded-lg transition-colors touch-manipulation"
@@ -196,6 +227,10 @@
 	<Dialog v-model="showDetails" :options="{ title: __('Invoice Details'), size: 'lg' }">
 		<template #body-content>
 			<div v-if="selectedInvoice" class="flex flex-col gap-3 sm:flex flex-col gap-4">
+				<div v-if="isPermanentlyFailed(selectedInvoice) && selectedInvoice.error" class="bg-red-50 border border-red-200 p-3 sm:p-4 rounded-lg">
+					<h4 class="font-semibold text-red-900 mb-2 text-sm sm:text-base">{{ __('Sync Error') }}</h4>
+					<p class="text-xs sm:text-sm text-red-700 break-words">{{ selectedInvoice.error }}</p>
+				</div>
 				<div class="bg-gray-50 p-3 sm:p-4 rounded-lg">
 					<h4 class="font-semibold text-gray-900 mb-2 text-sm sm:text-base">{{ __('Customer') }}</h4>
 					<p class="text-sm sm:text-base">{{ resolvedCustomerName(selectedInvoice) }}</p>
@@ -327,6 +362,7 @@ const emit = defineEmits([
 	"update:modelValue",
 	"sync-all",
 	"delete-invoice",
+	"retry-invoice",
 	"edit-invoice",
 	"print-invoice",
 	"return-invoice",
@@ -458,13 +494,27 @@ function syncAll() {
 }
 
 /**
+ * True once the backend has given up retrying this invoice automatically
+ * (status='failed' in invoice_queue, see push.js's MAX_RETRY_COUNT) — as
+ * opposed to merely 'pending' with some retries logged, which will still
+ * get picked up by the next automatic sync cycle on its own.
+ */
+function isPermanentlyFailed(invoice) {
+	return invoice.status === "failed"
+}
+
+/**
  * Pending invoices can only be deleted once they've permanently failed to
- * sync (sync_failed), and only while online - this prevents a cashier from
- * deleting a valid transaction that's just waiting for connectivity, while
- * still allowing cleanup of invoices that will never sync successfully.
+ * sync, and only while online - this prevents a cashier from deleting a
+ * valid transaction that's just waiting for connectivity, while still
+ * allowing cleanup of invoices that will never sync successfully.
  */
 function canDelete(invoice) {
-	return !props.isOffline && !!invoice.sync_failed
+	return !props.isOffline && isPermanentlyFailed(invoice)
+}
+
+function retryInvoice(invoice) {
+	emit("retry-invoice", invoice.id)
 }
 
 function deleteInvoice(invoice) {

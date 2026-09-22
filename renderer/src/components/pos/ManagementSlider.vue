@@ -112,6 +112,23 @@
 		<!-- Sync Status -->
 
 
+		<!-- Printer Settings -->
+		<button
+			@click="handleMenuClick('printer-settings')"
+			:class="[
+				'w-12 h-12 rounded-lg flex items-center justify-center transition-all relative group',
+				activeMenu === 'printer-settings'
+					? 'bg-gray-100 text-gray-900'
+					: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+			]"
+			:title="__('Printer Settings')"
+		>
+			<PrinterIcon class="w-6 h-6" />
+			<div class="absolute start-full ms-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+				{{ __('Printer Settings') }}
+			</div>
+		</button>
+
 		<!-- Settings -->
 		<button
 			@click="handleMenuClick('settings')"
@@ -143,6 +160,7 @@ import {
 	BookOpenIcon,
 	ClipboardDocumentCheckIcon,
 	TruckIcon,
+	PrinterIcon,
 } from "@heroicons/vue/24/outline"
 
 defineProps({

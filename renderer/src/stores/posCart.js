@@ -18,38 +18,66 @@ import { computed, nextTick, ref, toRaw, watch } from "vue"
  */
 function createAsyncQueue() {
 	let isProcessing = false
-	let pendingTask = null
+	let pendingTask = null // { taskFn, resolve }
 	let currentAbortController = null
+
+	async function runTask(taskFn) {
+		isProcessing = true
+		currentAbortController = new AbortController()
+
+		try {
+			await taskFn(currentAbortController.signal)
+		} finally {
+			isProcessing = false
+			currentAbortController = null
+
+			// Process pending task if any — chained separately (not awaited
+			// here) so ITS OWN promise settles independently, once it
+			// actually runs.
+			if (pendingTask) {
+				const next = pendingTask
+				pendingTask = null
+				runTask(next.taskFn).finally(next.resolve)
+			}
+		}
+	}
 
 	return {
 		/**
 		 * Enqueue a task. If already processing, replaces any pending task.
 		 * @param {Function} taskFn - Async function to execute
-		 * @returns {Promise} Resolves when task completes or is superseded
+		 * @returns {Promise<void>} Resolves once taskFn has ACTUALLY run
+		 *   (immediately, or later if queued as pending) — or once it's been
+		 *   superseded/cancelled without ever running. Never resolves before
+		 *   the work it represents has been settled one way or the other.
+		 *
+		 *   BUG FIXED (see posOffers/applyOffer callers): the previous
+		 *   implementation returned immediately (resolving with undefined)
+		 *   the moment a task got deferred to `pendingTask`, without waiting
+		 *   for it to actually execute. A caller like applyOffer() — which
+		 *   sets a local `result` flag inside taskFn and returns it after
+		 *   `await enqueue(...)` — would then read `result` before the
+		 *   deferred task ever ran, silently reporting failure/no-op even
+		 *   though the task (e.g. the manually-tapped "Tap to Apply" offer)
+		 *   WOULD apply moments later in the background. Confirmed live via
+		 *   automated testing: this let a POS transaction reach checkout and
+		 *   submit at full price although the cashier had genuinely tapped
+		 *   to apply a discount, because that tap raced an auto-triggered
+		 *   offer re-evaluation from the item having just been added to the
+		 *   cart (both go through this same queue).
 		 */
-		async enqueue(taskFn) {
-			// If currently processing, queue this as the next task (replacing any pending)
+		enqueue(taskFn) {
 			if (isProcessing) {
-				pendingTask = taskFn
-				return
+				// A previous call may already be waiting here as pendingTask —
+				// it's about to be replaced (only the latest superseding call
+				// actually runs), so resolve ITS promise now rather than
+				// leaving that earlier caller awaiting forever.
+				pendingTask?.resolve()
+				return new Promise((resolve) => {
+					pendingTask = { taskFn, resolve }
+				})
 			}
-
-			isProcessing = true
-			currentAbortController = new AbortController()
-
-			try {
-				await taskFn(currentAbortController.signal)
-			} finally {
-				isProcessing = false
-				currentAbortController = null
-
-				// Process pending task if any
-				if (pendingTask) {
-					const next = pendingTask
-					pendingTask = null
-					await this.enqueue(next)
-				}
-			}
+			return runTask(taskFn)
 		},
 
 		/**
@@ -59,6 +87,7 @@ function createAsyncQueue() {
 			if (currentAbortController) {
 				currentAbortController.abort()
 			}
+			pendingTask?.resolve()
 			pendingTask = null
 		},
 
@@ -760,6 +789,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return false
 		}
 
+		// Genuinely offline: compute client-side immediately, no point
+		// attempting a network call at all (see applyOfferOffline above).
+		if (offlineState.isOffline) {
+			const applied = applyOfferOffline(offer)
+			offersDialogRef?.resetApplyingState()
+			return applied
+		}
+
 		// Cancel any pending auto-processing since user is manually applying
 		debouncedProcessOffers.cancel()
 		offerQueue.cancel()
@@ -865,11 +902,25 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				result = true
 			} catch (error) {
 				if (signal?.aborted) return
-				console.error("Error applying offer:", error)
+				console.error("Error applying offer, falling back to offline computation:", error)
 				offerProcessingState.value.error = error.message
-				showError(__("Failed to apply offer. Please try again."))
+				// The online attempt failed to even reach the server (network
+				// error/timeout/502/503) rather than a legitimate server-side
+				// rejection — fall back to the same client-side computation
+				// used when genuinely offline, instead of just giving up. This
+				// is what makes manual apply resilient to a flaky connection,
+				// not only a fully-detected-offline one.
+				try {
+					result = applyOfferOffline(offer)
+					if (!result) {
+						showError(__("Failed to apply offer. Please try again."))
+					}
+				} catch (fallbackError) {
+					console.error("Offline fallback for applyOffer also failed:", fallbackError)
+					showError(__("Failed to apply offer. Please try again."))
+					result = false
+				}
 				offersDialogRef?.resetApplyingState()
-				result = false
 			} finally {
 				offerProcessingState.value.isProcessing = false
 			}
@@ -1102,8 +1153,12 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		} catch (error) {
 			if (signal?.aborted) return false
 			console.error("Error validating offers:", error)
-			offerProcessingState.value.error = error.message
-			return false
+			// Rethrow (see the matching comment in autoApplyEligibleOffers) so
+			// callers that go through triggerOfferProcessing get its bounded
+			// retry/backoff instead of giving up after one failed attempt.
+			// Direct callers outside that pipeline (POSSale.vue's cart-hash/
+			// customer watchers) catch this themselves.
+			throw error
 		}
 	}
 
@@ -1265,7 +1320,15 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		} catch (error) {
 			if (signal?.aborted) return
 			console.error("Error auto-applying offers:", error)
-			offerProcessingState.value.error = error.message
+			// Rethrow instead of swallowing here — this used to only get ONE
+			// attempt (no retry) before offerProcessingState.error was set,
+			// bypassing the bounded retry/backoff that triggerOfferProcessing
+			// (the caller several frames up) is set up to do. Letting it
+			// propagate means a transient 502 on pos_next.api.invoices.
+			// apply_offers gets the same multiple-attempts-then-warn
+			// treatment as every other offer-processing failure, instead of
+			// giving up after a single try.
+			throw error
 		}
 	}
 
@@ -1284,6 +1347,76 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * - Discount Amount (e.g., $5 off)
 	 * - Free Items (e.g., Buy 2 Get 1 Free)
 	 */
+	/**
+	 * Resolves which cart items a given offer's discount/free-item logic
+	 * should act on, based on its apply_on scope. Shared by the auto-apply
+	 * offline loop (applyOffersOffline) and the manual "Tap to Apply" offline
+	 * path (applyOfferOffline) so both compute eligibility identically.
+	 */
+	function resolveEligibleItemsForOffer(offer) {
+		if (offer.apply_on === "Item Code") {
+			const eligibleCodes = offer.eligible_items || []
+			return invoiceItems.value.filter((item) => eligibleCodes.includes(item.item_code))
+		}
+		if (offer.apply_on === "Item Group") {
+			const eligibleGroups = offer.eligible_item_groups || []
+			return invoiceItems.value.filter((item) => eligibleGroups.includes(item.item_group))
+		}
+		if (offer.apply_on === "Brand") {
+			const eligibleBrands = offer.eligible_brands || []
+			return invoiceItems.value.filter((item) => eligibleBrands.includes(item.brand))
+		}
+		if (offer.apply_on === "Transaction") {
+			return invoiceItems.value
+		}
+		return []
+	}
+
+	/**
+	 * Client-side computation for a SINGLE offer — the manual "Tap to Apply"
+	 * counterpart to applyOffersOffline() (which only ever handles
+	 * auto-apply offers). Used both when genuinely offline and as a fallback
+	 * when the online apply_offers call fails (see applyOffer's catch block)
+	 * — previously manual apply had NO offline path at all, so a "Tap to
+	 * Apply" offer (e.g. a member discount) always failed outright whenever
+	 * the server couldn't be reached, unlike auto-apply offers.
+	 */
+	function applyOfferOffline(offer) {
+		const isProductDiscount = offer.offer === "Give Product"
+		const eligibleItems = resolveEligibleItemsForOffer(offer)
+
+		if (eligibleItems.length === 0) {
+			showWarning(__("Your cart doesn't meet the requirements for this offer."))
+			return false
+		}
+
+		const applied = isProductDiscount
+			? applyOfflineFreeItem(offer, eligibleItems)
+			: applyOfflinePriceDiscount(offer, eligibleItems)
+
+		if (!applied) {
+			showWarning(__("Your cart doesn't meet the requirements for this offer."))
+			return false
+		}
+
+		appliedOffers.value = appliedOffers.value.filter((entry) => entry.code !== offer.name)
+		appliedOffers.value.push({
+			name: offer.title || offer.name,
+			code: offer.name,
+			offer,
+			source: "offline",
+			applied: true,
+			rules: [offer.name],
+			min_qty: offer.min_qty,
+			max_qty: offer.max_qty,
+			min_amt: offer.min_amt,
+			max_amt: offer.max_amt,
+		})
+		rebuildIncrementalCache()
+		showSuccess(__("Offline: {0} applied", [offer.title || offer.name]))
+		return true
+	}
+
 	function applyOffersOffline() {
 		// Skip if cart is empty or no offers available
 		if (invoiceItems.value.length === 0 || !offersStore.hasFetched) {
@@ -1322,29 +1455,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			for (const offer of newOffers) {
 				// Determine offer type: "Item Price" (discount) or "Give Product" (free item)
 				const isProductDiscount = offer.offer === "Give Product"
-
-				// Find eligible items based on offer.apply_on
-				let eligibleItems = []
-
-				if (offer.apply_on === "Item Code") {
-					const eligibleCodes = offer.eligible_items || []
-					eligibleItems = invoiceItems.value.filter((item) =>
-						eligibleCodes.includes(item.item_code),
-					)
-				} else if (offer.apply_on === "Item Group") {
-					const eligibleGroups = offer.eligible_item_groups || []
-					eligibleItems = invoiceItems.value.filter((item) =>
-						eligibleGroups.includes(item.item_group),
-					)
-				} else if (offer.apply_on === "Brand") {
-					const eligibleBrands = offer.eligible_brands || []
-					eligibleItems = invoiceItems.value.filter((item) =>
-						eligibleBrands.includes(item.brand),
-					)
-				} else if (offer.apply_on === "Transaction") {
-					// Transaction-level discount applies to all items
-					eligibleItems = invoiceItems.value
-				}
+				const eligibleItems = resolveEligibleItemsForOffer(offer)
 
 				if (eligibleItems.length === 0) continue
 
@@ -2056,30 +2167,56 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// Increment generation to invalidate any in-flight operations
 		const currentGen = ++cartGeneration
 
+		// Auto-retry ceiling for a flaky-but-not-fully-offline server (502/503
+		// bursts, slow gateway). Previously 3 tries with a ~500-1500ms backoff
+		// (~2s total) — too short to ride out a real gateway blip, and once
+		// exhausted the failure was only ever written to
+		// offerProcessingState.error, which no UI ever read. That meant an
+		// auto-apply offer (discount_amount / free_item — no "Tap to Apply"
+		// step to fail loudly) could silently never apply while Checkout
+		// stayed fully clickable, letting a cashier charge full price with
+		// zero warning. Longer retries buy real transient blips a chance to
+		// resolve on their own; InvoiceCart.vue now also reads isProcessing/
+		// error to gate Checkout and show a warning banner instead of staying
+		// silent once retries are exhausted.
+		const MAX_AUTO_RETRIES = 6
+
 		// Enqueue the processing task - queue handles concurrency
 		offerQueue.enqueue(async (signal) => {
+			offerProcessingState.value.isProcessing = true
+			offerProcessingState.value.isAutoProcessing = true
+			offerProcessingState.value.error = null
+
 			try {
-				offerProcessingState.value.isProcessing = true
-				offerProcessingState.value.isAutoProcessing = true
-				offerProcessingState.value.error = null
-
 				await processOffersInternal(signal, currentGen, force)
-			} catch (error) {
-				if (!signal?.aborted) {
-					console.error("Error in offer processing:", error)
-					offerProcessingState.value.error = error.message
-					offerProcessingState.value.retryCount++
-
-					// Auto-retry on failure (max 3 times)
-					if (offerProcessingState.value.retryCount < 3) {
-						setTimeout(() => {
-							triggerOfferProcessing(true)
-						}, 500 * offerProcessingState.value.retryCount)
-					}
-				}
-			} finally {
 				offerProcessingState.value.isProcessing = false
 				offerProcessingState.value.isAutoProcessing = false
+			} catch (error) {
+				if (signal?.aborted) {
+					offerProcessingState.value.isProcessing = false
+					offerProcessingState.value.isAutoProcessing = false
+					return
+				}
+
+				console.error("Error in offer processing:", error)
+				offerProcessingState.value.error = error.message
+				offerProcessingState.value.retryCount++
+
+				if (offerProcessingState.value.retryCount < MAX_AUTO_RETRIES) {
+					// isProcessing stays true across the retry gap on purpose —
+					// the UI should keep showing "checking offers", not flash
+					// back to idle between attempts.
+					setTimeout(() => {
+						triggerOfferProcessing(true)
+					}, Math.min(1000 * offerProcessingState.value.retryCount, 5000))
+				} else {
+					// Gave up. Leave isProcessing false + error set so the UI
+					// can warn the cashier that the offer could not be
+					// verified, instead of silently proceeding as if nothing
+					// was wrong.
+					offerProcessingState.value.isProcessing = false
+					offerProcessingState.value.isAutoProcessing = false
+				}
 			}
 		})
 	}

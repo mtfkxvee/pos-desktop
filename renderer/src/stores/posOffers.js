@@ -143,6 +143,29 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		const cartBrands = cartSnapshot.value.brands || []
 		const cartCustomerGroup = cartSnapshot.value.customerGroup || null
 
+		// Defensively reject offers with no actual discount value configured.
+		// Found live in production data: 8 enabled, in-date-range Pricing
+		// Rules (e.g. "VOUCHER SWEETY 5000", "PROMO BUNDLING 5100") with
+		// discount_percentage=0, discount_amount=0, rate=0 all at once —
+		// likely incomplete/abandoned drafts left enabled by mistake. The
+		// backend's get_offers() has no filter for this either, so without
+		// this check a matching cart would show these as a real "0% OFF" /
+		// "Rp 0 OFF" offer that does nothing when applied — confusing at
+		// best, and indistinguishable from a genuine offer at a glance.
+		if (offer?.offer === "Give Product") {
+			if (!(Number(offer?.free_qty) > 0)) {
+				return { eligible: false, reason: "Offer has no free quantity configured" }
+			}
+		} else {
+			const hasRealDiscount =
+				Number(offer?.discount_percentage) > 0 ||
+				Number(offer?.discount_amount) > 0 ||
+				Number(offer?.rate) > 0
+			if (!hasRealDiscount) {
+				return { eligible: false, reason: "Offer has no discount value configured" }
+			}
+		}
+
 		// Check if cart is empty
 		if (itemCount === 0) {
 			return {
@@ -326,9 +349,18 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 						setAvailableOffers(cachedOffers)
 						return true
 					}
-					// No cached offers available offline
-					hasFetched.value = true // Mark as fetched to prevent retries
-					return false
+					// No cached offers available offline. This is ambiguous —
+					// it could genuinely mean no promos are configured, or it
+					// could mean this device has never once successfully
+					// synced offers (e.g. the server was already down when
+					// the shift started). Previously this permanently latched
+					// hasFetched=true "to prevent retries", which silently
+					// treated "unknown" the same as "confirmed no discounts"
+					// forever, even after connectivity came back. Throwing
+					// instead lets the caller's bounded retry/backoff (see
+					// triggerOfferProcessing in posCart.js) keep trying, and
+					// warn the cashier if it truly never resolves.
+					throw new Error("Tidak ada data promo tersimpan untuk mode offline")
 				}
 
 				// Online: fetch from API
@@ -349,8 +381,15 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				return true
 			} catch (error) {
 				console.error("Error fetching offers:", error)
-				hasFetched.value = true // Mark as fetched to prevent infinite retries
-				return false
+				// Deliberately NOT setting hasFetched=true here anymore — that
+				// used to permanently latch this store into "no offers, don't
+				// ask again" the moment a single fetch failed (one 502 was
+				// enough), which starved every later retry attempt of real
+				// data even though the caller kept calling in on a backoff
+				// loop expecting a real second attempt. Propagate instead so
+				// triggerOfferProcessing's retry/error state actually reflects
+				// reality and can warn the cashier once retries are exhausted.
+				throw error
 			} finally {
 				fetchPromise = null
 			}

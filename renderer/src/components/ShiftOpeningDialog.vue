@@ -278,9 +278,12 @@ async function initDialog() {
 		// Await profile fetch to ensure data is loaded before proceeding
 		await profilesResource.fetch()
 
-		// Check if user already has an open shift
+		// Check if user already has an open shift. Require an actual
+		// pos_opening_shift, not just any truthy value — a bare `{}` must
+		// never be treated as "an open shift was found" (see
+		// server/frappe-client.js for where that could originate).
 		const checkResult = await checkOpeningShift.fetch()
-		if (checkResult) {
+		if (checkResult?.pos_opening_shift) {
 			existingShift.value = checkResult
 			step.value = 3
 		}

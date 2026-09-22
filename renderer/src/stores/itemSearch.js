@@ -1928,6 +1928,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			pinnedItemsVersion.value += 1
 			return
 		}
+		const _t0 = performance.now()
 		try {
 			const result = await call("pos_next.api.pinned_items.get_pinned_items", {
 				pos_profile: profile,
@@ -1935,6 +1936,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			const list = result?.message || result || []
 			pinnedItems.value = new Set(list)
 			pinnedItemsVersion.value += 1
+			log.debug(`[PinnedItems] get_pinned_items done in ${(performance.now() - _t0).toFixed(1)}ms, count=${list.length}`)
 
 			if (list.length > 0) {
 				// Fetch full item details so pinned items appear at top even before lazy load reaches them
@@ -1944,6 +1946,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 				)
 				pinnedItemDetails.value = detailsResult?.message || detailsResult || []
 				pinnedItemsVersion.value += 1
+				log.debug(`[PinnedItems] get_pinned_item_details done in ${(performance.now() - _t0).toFixed(1)}ms, count=${pinnedItemDetails.value.length}`)
 				if (pinnedItemDetails.value.length > 0) {
 					registerItems(pinnedItemDetails.value, registeredAllItems)
 				}
@@ -2290,6 +2293,15 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			return
 		}
 
+		// Fired in parallel with get_pos_profile_data below, not chained after
+		// it — both are cache-first (instant, no network round-trip) now, but
+		// awaiting get_pos_profile_data first before even STARTING these added
+		// a whole extra sequential hop in front of pinned items, which is why
+		// they visibly rendered after the rest of the item grid instead of
+		// alongside it.
+		loadPinnedItems(profile)
+		loadPinnedCategories(profile)
+
 		try {
 			// Single API call returns EVERYTHING - no need for separate loadItemGroups()
 			const data = await call("pos_next.api.pos_profile.get_pos_profile_data", {
@@ -2302,10 +2314,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 			// Set hierarchical item groups (with child_groups) - INSTANT tab display!
 			itemGroups.value = data?.item_groups_hierarchy || []
 			log.info(`Loaded ${itemGroups.value.length} item groups with hierarchy`)
-
-			// Load pinned items and categories for this profile (non-blocking)
-			loadPinnedItems(profile)
-			loadPinnedCategories(profile)
 
 			// Cache profile data for offline use (survives component remount)
 			try {
