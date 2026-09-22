@@ -3,10 +3,11 @@ import { computed, reactive } from "vue";
 import { initUserFromDevice, userData } from "./user";
 
 /**
- * Desktop build: there is no Frappe cookie session in this renderer at all —
- * the device already authenticated (API key/secret) before this window ever
- * mounted, so session.isLoggedIn is always true, and .user is just the
- * device's provisioned user (see data/user.js).
+ * Desktop build: no Frappe cookie session in this renderer — the currently
+ * active cashier already authenticated (API key/secret) via the login
+ * window before this renderer ever mounted, so session.isLoggedIn is always
+ * true while this window is open. Logging out closes this window and
+ * returns to the login window (see main/index.js's "logout" IPC handler).
  */
 export function sessionUser() {
   return userData.userId;
@@ -15,10 +16,19 @@ export function sessionUser() {
 export const session = reactive({
   user: null,
   isLoggedIn: computed(() => true),
-  // Kept only so components that reference session.login/.logout don't
-  // crash — there is no in-app login/logout in the desktop build.
   login: { loading: false },
-  logout: { loading: false },
+  logout: {
+    loading: false,
+    async submit() {
+      session.logout.loading = true;
+      try {
+        await fetch("http://127.0.0.1:8871/auth/logout", { method: "POST" });
+      } finally {
+        session.logout.loading = false;
+        window.posDesktop?.logout();
+      }
+    },
+  },
 });
 
 export async function initSession() {

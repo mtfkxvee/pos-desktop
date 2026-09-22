@@ -1,9 +1,10 @@
 import { computed, reactive } from "vue";
 
 /**
- * Desktop build: no Frappe cookie session to poll. The device's user is
- * fixed at setup time (see server/auth/device-setup.js) and read once from
- * the local server's /auth/status endpoint.
+ * Desktop build: no Frappe cookie session to poll. The active user is
+ * whichever cashier is currently logged in on this device (per-cashier
+ * login, see server/auth/device-setup.js) — read once from the local
+ * server's /auth/status endpoint.
  */
 export const userData = reactive({
   userId: null,
@@ -50,11 +51,11 @@ export const userResource = {
 export async function initUserFromDevice() {
   try {
     const res = await fetch("http://127.0.0.1:8871/auth/status").then((r) => r.json());
-    if (res?.device?.user) {
-      userData.userId = res.device.user;
-      userData.fullName = res.device.user;
+    if (res?.username) {
+      userData.userId = res.username;
+      userData.fullName = res.username;
     }
-    return res?.device?.user || null;
+    return res?.username || null;
   } catch {
     return null;
   }

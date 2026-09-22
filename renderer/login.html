@@ -2,69 +2,194 @@
 <html>
   <head>
     <meta charset="utf-8" />
-    <title>POS Desktop — Setup Device</title>
+    <title>POS Desktop — Login</title>
     <style>
-      body { font-family: sans-serif; max-width: 420px; margin: 2rem auto; }
-      label { display: block; margin-top: 0.75rem; font-size: 0.9rem; }
-      input { width: 100%; padding: 0.4rem; box-sizing: border-box; }
-      button { margin-top: 1.25rem; padding: 0.6rem 1rem; width: 100%; }
-      #msg { margin-top: 1rem; font-size: 0.9rem; white-space: pre-wrap; }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        font-family: "Segoe UI", system-ui, sans-serif;
+      }
+      body {
+        /* left-anchored: the window is more square than the (landscape)
+           source image, so `cover` must crop somewhere — anchoring left
+           keeps the logo/wordmark fully visible and trims the illustration
+           side instead, which tolerates cropping much better. */
+        background: url("../build/Code_Generated_Image.jpg") left center / cover no-repeat;
+        display: flex;
+        align-items: flex-end;
+      }
+
+      /* Login card sits in the empty lower-left area of the background
+         artwork (below the X-Sha logo, left of the illustration group). */
+      #login-card {
+        margin-left: 6%;
+        margin-bottom: 8%;
+        width: 340px;
+        max-width: 90vw;
+        background: rgba(255, 255, 255, 0.92);
+        backdrop-filter: blur(6px);
+        border-radius: 16px;
+        padding: 1.75rem 1.75rem 1.5rem;
+        box-shadow: 0 12px 32px rgba(80, 40, 120, 0.18);
+      }
+
+      h2 {
+        margin: 0 0 0.25rem;
+        font-size: 1.25rem;
+        color: #3d1f5c;
+      }
+      #subtitle {
+        margin: 0 0 0.75rem;
+        color: #6b6b6b;
+        font-size: 0.82rem;
+      }
+      #device-info {
+        color: #7a4fa8;
+        font-size: 0.8rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+      }
+
+      label {
+        display: block;
+        margin-top: 0.65rem;
+        font-size: 0.82rem;
+        color: #444;
+        font-weight: 500;
+      }
+      input {
+        width: 100%;
+        padding: 0.55rem 0.65rem;
+        margin-top: 0.25rem;
+        box-sizing: border-box;
+        border: 1.5px solid #ddd4e8;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        outline: none;
+        transition: border-color 0.15s ease;
+      }
+      input:focus {
+        border-color: #8b4fc7;
+      }
+
+      button {
+        margin-top: 1.25rem;
+        padding: 0.65rem 1rem;
+        width: 100%;
+        border: none;
+        border-radius: 8px;
+        background: linear-gradient(135deg, #8b4fc7, #5f2f96);
+        color: #fff;
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: opacity 0.15s ease;
+      }
+      button:hover { opacity: 0.92; }
+      button:active { opacity: 0.85; }
+
+      #msg {
+        margin-top: 0.85rem;
+        font-size: 0.82rem;
+        white-space: pre-wrap;
+        line-height: 1.4;
+      }
       #msg.error { color: #b00020; }
       #msg.success { color: #146c2e; }
+
+      .hidden { display: none; }
     </style>
   </head>
   <body>
-    <h2>Setup Device — Login Pertama Kali</h2>
-    <p style="color:#555; font-size:0.85rem;">
-      Butuh koneksi internet. Setelah berhasil, device ini akan tersimpan
-      permanen dan tidak perlu login lagi.
-    </p>
-    <form id="setup-form">
-      <label>Server URL (mis. https://erp.contoh.com)
-        <input type="text" name="baseUrl" required />
-      </label>
-      <label>Username / Email
-        <input type="text" name="usr" required />
-      </label>
-      <label>Password
-        <input type="password" name="pwd" required />
-      </label>
-      <label>Kode Outlet (mis. JKT01)
-        <input type="text" name="outletCode" required />
-      </label>
-      <label>POS Profile Default
-        <input type="text" name="posProfile" required />
-      </label>
-      <label>Default Warehouse
-        <input type="text" name="defaultWarehouse" required />
-      </label>
-      <button type="submit">Setup & Login</button>
-    </form>
-    <div id="msg"></div>
+    <div id="login-card">
+      <h2 id="title">Login Kasir</h2>
+      <p id="subtitle"></p>
+      <div id="device-info"></div>
+
+      <form id="login-form">
+        <div id="setup-fields" class="hidden">
+          <label>Server URL (mis. https://erp.contoh.com)
+            <input type="text" name="baseUrl" />
+          </label>
+          <label>Kode Outlet (mis. JKT01)
+            <input type="text" name="outletCode" />
+          </label>
+          <label>POS Profile Default
+            <input type="text" name="posProfile" />
+          </label>
+          <label>Default Warehouse
+            <input type="text" name="defaultWarehouse" />
+          </label>
+        </div>
+
+        <label>Username / Email
+          <input type="text" name="usr" required autofocus />
+        </label>
+        <label>Password
+          <input type="password" name="pwd" required />
+        </label>
+        <button type="submit">Login</button>
+      </form>
+      <div id="msg"></div>
+    </div>
 
     <script>
-      const form = document.getElementById("setup-form");
+      const form = document.getElementById("login-form");
       const msg = document.getElementById("msg");
+      const setupFields = document.getElementById("setup-fields");
+      const title = document.getElementById("title");
+      const subtitle = document.getElementById("subtitle");
+      const deviceInfo = document.getElementById("device-info");
+
+      let deviceConfigured = false;
+
+      async function init() {
+        try {
+          const res = await fetch("http://127.0.0.1:8871/auth/status");
+          const status = await res.json();
+          deviceConfigured = !!status.configured;
+
+          if (deviceConfigured) {
+            title.textContent = "Login Kasir";
+            subtitle.textContent = "Masukkan username dan password Anda.";
+            deviceInfo.textContent = `Outlet: ${status.device.outletCode} · ${status.device.posProfile}`;
+            setupFields.classList.add("hidden");
+            for (const el of setupFields.querySelectorAll("input")) el.required = false;
+          } else {
+            title.textContent = "Setup Device — Login Pertama Kali";
+            subtitle.textContent = "Butuh koneksi internet. Data ini disimpan sekali untuk device ini.";
+            setupFields.classList.remove("hidden");
+            for (const el of setupFields.querySelectorAll("input")) el.required = true;
+          }
+        } catch (err) {
+          msg.className = "error";
+          msg.textContent = "Tidak bisa menghubungi local server: " + err.message;
+        }
+      }
+      init();
 
       form.addEventListener("submit", async (e) => {
         e.preventDefault();
         msg.className = "";
-        msg.textContent = "Menghubungi server...";
+        msg.textContent = "Memproses login...";
 
         const data = Object.fromEntries(new FormData(form).entries());
         try {
-          const res = await fetch("http://127.0.0.1:8871/auth/setup", {
+          const res = await fetch("http://127.0.0.1:8871/auth/login", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(data),
           });
           const json = await res.json();
           if (!res.ok || !json.ok) {
-            throw new Error(json.error || "Setup gagal");
+            throw new Error(json.error || "Login gagal");
           }
           msg.className = "success";
-          msg.textContent = "Setup berhasil untuk user " + json.device.user + ". Membuka aplikasi kasir...";
-          window.posDesktop.notifySetupComplete();
+          msg.textContent = "Login berhasil sebagai " + json.username + ". Membuka aplikasi kasir...";
+          window.posDesktop.notifyLoginComplete();
         } catch (err) {
           msg.className = "error";
           msg.textContent = "Error: " + err.message;
