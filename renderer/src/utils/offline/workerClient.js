@@ -72,7 +72,7 @@ export const offlineWorker = {
     // Old app's getCacheStats() shape: {items, customers, queuedInvoices,
     // cacheReady, stockReady, lastSync}. /cache/status uses different field
     // names server-side (itemCount/customerCount/ready) — remap here so
-    // consumers (posSync.js, useSpeedModeReadiness.js) don't need changes.
+    // consumers (posSync.js) don't need changes.
     const r = await getJSON("/cache/status");
     let queuedInvoices = 0;
     try {
@@ -173,6 +173,9 @@ export const offlineWorker = {
   async deleteOfflineInvoice(id) {
     await del(`/invoices/queue/${id}`);
     return true;
+  },
+  async retryOfflineInvoice(id) {
+    return postJSON(`/invoices/queue/${id}/retry`, {});
   },
 
   // Manually trigger the same pull+push cycle the scheduler runs automatically.
