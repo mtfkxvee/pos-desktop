@@ -30,10 +30,17 @@ Repeat with a different `appId`/`productName` per outlet as needed.
 - Deploy the `generate_device_api_key` backend change (see
   `C:\Users\User\pos\pos_next\api\utilities.py`) to the target Frappe server
   first — device setup (Tahap 3) depends on it.
-- Confirm the target machine has a supported thermal printer reachable via
-  `tcp://` (network) — the `printer:` (Windows shared-printer) interface
-  needs the extra `printer` npm package installed, which requires native
-  build tools on that machine.
+- Set `printerInterface` via `POST /print/config` (or ahead of time in
+  the device's userData `config.json`):
+  - Network printer: `"tcp://<ip>:9100"`.
+  - USB/Windows printer: `"printer:<Exact Name As Shown In Windows>"` —
+    sent via the Win32 RAW print spooler (`main/print-raw.ps1`), **no
+    native npm module or build tools needed on the outlet machine** at
+    all (PowerShell/.NET ship with every Windows install). An earlier
+    attempt used the `printer` npm package for this, but its C++ source
+    doesn't compile against modern MSVC — abandoned in favor of the
+    PowerShell route, which is both simpler and needs zero native
+    compilation anywhere, including on this dev machine.
 
 ## What's NOT packaged
 

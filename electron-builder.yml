@@ -4,9 +4,10 @@
 # e.g.:
 #   POS_PRODUCT_NAME="POS Kasir - Toko Jakarta" POS_APP_ID="id.nursa.pos.jkt01" npm run dist
 #
-# Defaults — override per-outlet via env vars before running `npm run dist`
-# (see scripts/build-outlet.js), since electron-builder.yml itself doesn't
-# support env-var fallback syntax reliably across versions.
+# Defaults — override per-outlet at build time via CLI flags instead of env
+# vars (electron-builder.yml doesn't support env-var fallback syntax
+# reliably across versions). See docs/PACKAGING.md for the exact command:
+#   npx electron-builder --win -c.appId=... -c.productName="..."
 appId: id.nursa.pos.desktop
 productName: POS Desktop
 copyright: Copyright © 2026
@@ -20,6 +21,8 @@ files:
   - server/**/*
   - renderer/dist/**/*
   - renderer/login.html
+  - build/icon.png
+  - build/Code_Generated_Image.jpg
   - package.json
   - "!renderer/src/**/*"
   - "!renderer/node_modules/**/*"
@@ -30,6 +33,10 @@ extraResources: []
 
 # SQLite DB file, credentials, and device config live in userData — never
 # touched by the installer/uninstaller.
+#
+# No native .node binaries ship with the app anymore (printing is done via
+# node-thermal-printer, pure JS + PowerShell RAW-print, see main/printer.js)
+# — this stays as a defensive default in case a future native dep is added.
 asarUnpack:
   - "**/*.node"
 
@@ -38,9 +45,9 @@ win:
     - target: nsis
       arch:
         - x64
-  # No custom icon yet — electron-builder falls back to its own default.
-  # Add build/icon.ico (256x256) and uncomment to brand the installer/app:
-  # icon: build/icon.ico
+  # NURSA POS logo — electron-builder auto-generates the multi-resolution
+  # .ico from this 500x500 PNG at build time (no manual conversion needed).
+  icon: build/icon.png
 
 nsis:
   oneClick: false

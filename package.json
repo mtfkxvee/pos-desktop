@@ -5,7 +5,7 @@
   "private": true,
   "main": "main/index.js",
   "scripts": {
-    "dev": "electron .",
+    "dev": "node scripts/dev.js",
     "start": "electron .",
     "build:renderer": "cd renderer && npm run build",
     "dist": "npm run build:renderer && electron-builder --win"
