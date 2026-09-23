@@ -24,15 +24,31 @@ Menu.setApplicationMenu(null);
 let mainWindow;
 let loginWindow;
 
+// Set once a downloaded update is ready to install, and re-sent every time
+// openMainWindow() runs — a fresh window (e.g. after a logout/re-login)
+// otherwise has no way to know an update became ready while it didn't
+// exist yet (the IPC 'update-ready' event only reaches windows that are
+// listening for it at the moment it's sent).
+let pendingUpdateInfo = null;
+
+function notifyMainWindowOfUpdate() {
+  if (pendingUpdateInfo && mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send("update-ready", pendingUpdateInfo);
+  }
+}
+
 // Auto-update: checks the GitHub Releases feed configured in
 // electron-builder.yml's `publish` block. Deliberately does NOT force a
 // restart mid-check — checkForUpdatesAndNotify() downloads in the
-// background and only installs the next time the app quits (electron-updater
-// hooks app 'before-quit' for this itself), so a cashier mid-shift is never
-// interrupted by an update popping up. Only runs on a packaged build:
-// app.isPackaged is false when running via `npm run dev`/`electron .` from
-// source, where there's no published feed to check against anyway (it would
-// just throw "Cannot find latest.yml").
+// background, and by default only installs the next time the app quits
+// (electron-updater hooks app 'before-quit' for this itself via
+// autoInstallOnAppQuit). AppUpdateBanner.vue additionally lets the cashier
+// trigger the install explicitly (e.g. "update now, it's quiet") via the
+// 'install-update-now' IPC below — either path works, whichever comes
+// first. Only runs on a packaged build: app.isPackaged is false when
+// running via `npm run dev`/`electron .` from source, where there's no
+// published feed to check against anyway (it would just throw "Cannot
+// find latest.yml").
 function initAutoUpdate() {
   if (!app.isPackaged) return;
 
@@ -48,7 +64,9 @@ function initAutoUpdate() {
     console.log(`[autoUpdater] update available: v${info.version} — downloading in background`);
   });
   autoUpdater.on("update-downloaded", (info) => {
-    console.log(`[autoUpdater] v${info.version} downloaded — will install next time the app quits`);
+    console.log(`[autoUpdater] v${info.version} downloaded — ready to install`);
+    pendingUpdateInfo = { version: info.version };
+    notifyMainWindowOfUpdate();
   });
 
   autoUpdater.checkForUpdatesAndNotify().catch((err) => {
@@ -105,6 +123,7 @@ function openMainWindow() {
   });
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
+    notifyMainWindowOfUpdate();
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -193,6 +212,14 @@ ipcMain.on("logout", () => {
     mainWindow = null;
   }
   openLoginWindow();
+});
+
+// Cashier chose "Update Sekarang" from AppUpdateBanner.vue instead of
+// waiting for the next natural quit. quitAndInstall() closes every window
+// itself (no need to close mainWindow/loginWindow by hand first) and
+// relaunches on the new version.
+ipcMain.on("install-update-now", () => {
+  autoUpdater.quitAndInstall();
 });
 
 app.whenReady().then(bootstrap);

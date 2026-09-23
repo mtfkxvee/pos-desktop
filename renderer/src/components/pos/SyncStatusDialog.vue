@@ -69,12 +69,28 @@
 								</div>
 								<span class="font-mono text-sm text-gray-600">{{ formatNumber(row.count) }}</span>
 							</div>
-							<p class="text-xs text-gray-500">
-								{{ __('Terakhir diperbarui:') }}
-								<span :class="row.lastSyncedAt ? 'text-gray-700' : 'text-amber-600'">
-									{{ formatRelative(row.lastSyncedAt) }}
-								</span>
-							</p>
+							<div class="flex items-center justify-between">
+								<p v-if="row.noTimestamp" class="text-xs text-gray-500">
+									<span :class="row.count > 0 ? 'text-gray-700' : 'text-amber-600'">
+										{{ row.count > 0 ? __('Tersedia') : __('Belum pernah') }}
+									</span>
+								</p>
+								<p v-else class="text-xs text-gray-500">
+									{{ __('Terakhir diperbarui:') }}
+									<span :class="row.lastSyncedAt ? 'text-gray-700' : 'text-amber-600'">
+										{{ formatRelative(row.lastSyncedAt) }}
+									</span>
+								</p>
+								<button
+									v-if="row.type"
+									@click="handleSyncType(row.type)"
+									:disabled="syncingType === row.type || !overview.online"
+									class="text-xs font-semibold text-blue-600 hover:text-blue-700 disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1"
+								>
+									<ArrowPathIcon class="w-3 h-3" :class="{ 'animate-spin': syncingType === row.type }" />
+									{{ syncingType === row.type ? __('Sync...') : __('Sync') }}
+								</button>
+							</div>
 						</div>
 					</div>
 
@@ -126,6 +142,7 @@ import {
 	ReceiptPercentIcon,
 	CreditCardIcon,
 	BuildingStorefrontIcon,
+	TagIcon,
 	CheckCircleIcon,
 } from "@heroicons/vue/24/outline"
 import { useToast } from "@/composables/useToast"
@@ -137,17 +154,26 @@ const BASE = "http://127.0.0.1:8871"
 
 const loading = ref(true)
 const syncing = ref(false)
+const syncingType = ref(null)
 const overview = ref(null)
 let pollTimer = null
 
+// `type` matches server/index.js's SYNCABLE map (POST /sync/run/:type) —
+// only set for rows the outlet can manually refresh on their own (item,
+// customer, promo, payment method, per what was actually asked for).
+// Taxes/POS Profile stay read-only here, refreshed by "Sync Sekarang".
 const dataRows = computed(() => {
 	if (!overview.value) return []
 	return [
-		{ label: __("Katalog Barang"), icon: CubeIcon, count: overview.value.items.count, lastSyncedAt: overview.value.items.lastSyncedAt },
-		{ label: __("Pelanggan"), icon: UserGroupIcon, count: overview.value.customers.count, lastSyncedAt: overview.value.customers.lastSyncedAt },
+		{ label: __("Katalog Barang"), icon: CubeIcon, type: "items", count: overview.value.items.count, lastSyncedAt: overview.value.items.lastSyncedAt },
+		{ label: __("Pelanggan"), icon: UserGroupIcon, type: "customers", count: overview.value.customers.count, lastSyncedAt: overview.value.customers.lastSyncedAt },
+		{ label: __("Promo & Kupon"), icon: TagIcon, type: "offers", count: overview.value.offers.count, lastSyncedAt: overview.value.offers.lastSyncedAt },
+		{ label: __("Metode Pembayaran"), icon: CreditCardIcon, type: "paymentMethods", count: overview.value.paymentMethods.count, lastSyncedAt: overview.value.paymentMethods.lastSyncedAt },
 		{ label: __("Pajak"), icon: ReceiptPercentIcon, count: overview.value.taxes.count, lastSyncedAt: overview.value.taxes.lastSyncedAt },
-		{ label: __("Metode Pembayaran"), icon: CreditCardIcon, count: overview.value.paymentMethods.count, lastSyncedAt: overview.value.paymentMethods.lastSyncedAt },
-		{ label: __("POS Profile"), icon: BuildingStorefrontIcon, count: overview.value.posProfiles.count, lastSyncedAt: overview.value.paymentMethods.lastSyncedAt },
+		// posProfiles has no lastSyncedAt of its own in /sync/overview (a
+		// full-refetch table with no separate timestamp column) — a row
+		// existing at all means it was fetched successfully at least once.
+		{ label: __("POS Profile"), icon: BuildingStorefrontIcon, count: overview.value.posProfiles.count, noTimestamp: true },
 	]
 })
 
@@ -181,6 +207,26 @@ async function loadOverview() {
 		overview.value = null
 	} finally {
 		loading.value = false
+	}
+}
+
+async function handleSyncType(type) {
+	syncingType.value = type
+	try {
+		const res = await fetch(`${BASE}/sync/run/${type}`, { method: "POST" })
+		const data = await res.json()
+		if (!res.ok || data.error) {
+			showError(data.error || __("Sync gagal"))
+		} else if (data.online === false) {
+			showError(__("Tidak bisa sync — server tidak terjangkau."))
+		} else {
+			showSuccess(__("Berhasil disinkronkan."))
+		}
+		await loadOverview()
+	} catch (e) {
+		showError(__("Sync gagal: {0}", [e.message]))
+	} finally {
+		syncingType.value = null
 	}
 }
 

@@ -11,7 +11,14 @@ const {
 } = require("./auth/device-setup");
 const { pingServer } = require("./sync/ping");
 const { pushQueuedInvoices, getQueueStatus } = require("./sync/push");
-const { pullAll } = require("./sync/pull");
+const {
+  pullAll,
+  pullItems,
+  pullCustomers,
+  pullTaxes,
+  pullPaymentMethods,
+  pullOffers,
+} = require("./sync/pull");
 const { startScheduler } = require("./sync/scheduler");
 const invoicesRouter = require("./routes/invoices");
 const rpcRouter = require("./routes/rpc");
@@ -159,6 +166,37 @@ function startServer({ port = 8871, dbPath } = {}) {
     const pull = await pullAll().catch((err) => ({ error: err.message }));
     const push = await pushQueuedInvoices().catch((err) => ({ error: err.message }));
     res.json({ online: true, pull, push });
+  });
+
+  // Per-category manual sync (SyncStatusDialog's individual "Sync" buttons)
+  // — lets the outlet refresh just, say, promos right after a new one was
+  // configured in ERP, instead of waiting for the next ~2 min background
+  // cycle or running a full pullAll() for one changed table.
+  const SYNCABLE = {
+    items: pullItems,
+    customers: pullCustomers,
+    taxes: pullTaxes,
+    paymentMethods: pullPaymentMethods,
+    offers: pullOffers,
+  };
+  app.post("/sync/run/:type", async (req, res) => {
+    const puller = SYNCABLE[req.params.type];
+    if (!puller) {
+      return res.status(400).json({ error: `Tipe sync tidak dikenal: "${req.params.type}"` });
+    }
+    const online = await pingServer();
+    if (!online) return res.json({ online: false });
+
+    const device = loadDeviceConfig();
+    if (!device?.posProfile) {
+      return res.status(400).json({ error: "Device belum ter-setup (POS Profile tidak ditemukan)" });
+    }
+    try {
+      const result = await puller(device.posProfile);
+      res.json({ online: true, result });
+    } catch (err) {
+      res.status(502).json({ online: true, error: err.message });
+    }
   });
 
   // No auto-start here — activeUser is in-memory and always starts empty on

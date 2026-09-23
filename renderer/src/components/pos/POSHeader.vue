@@ -27,6 +27,50 @@
 								<span class="absolute inset-0 bg-white/20 rounded-md animate-pulse"></span>
 								<span class="relative">v{{ appVersion }}</span>
 							</span>
+
+							<!-- Update-ready badge — non-blocking, on purpose: an outlet
+							     mid-transaction shouldn't get interrupted, they click this
+							     whenever it's actually quiet (see AppUpdateBanner.vue). -->
+							<div v-if="updateReady" class="relative flex-shrink-0">
+								<button
+									@click="showUpdatePopover = !showUpdatePopover"
+									@blur="handleUpdateBlur"
+									class="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-bold bg-green-100 hover:bg-green-200 text-green-700 rounded-md transition-colors animate-pulse"
+									:title="__('Update tersedia')"
+								>
+									<svg class="w-2.5 h-2.5 sm:w-3 sm:h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+									</svg>
+									{{ __('Update') }}
+								</button>
+
+								<div
+									v-if="showUpdatePopover"
+									@mousedown.prevent
+									class="absolute top-full mt-2 start-0 z-[999] w-64 bg-gray-900 rounded-lg shadow-xl p-3"
+								>
+									<p class="text-xs font-semibold text-white mb-1">
+										{{ __('Update v{0} siap dipasang', [updateVersion]) }}
+									</p>
+									<p class="text-[11px] text-gray-400 mb-3">
+										{{ __('App akan restart sebentar untuk memasang update. Pastikan toko sedang sepi/tidak ada transaksi berjalan.') }}
+									</p>
+									<div class="flex gap-2">
+										<button
+											@click="showUpdatePopover = false"
+											class="flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-md bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+										>
+											{{ __('Nanti') }}
+										</button>
+										<button
+											@click="installUpdateNow"
+											class="flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-md bg-green-600 hover:bg-green-700 text-white transition-colors"
+										>
+											{{ __('Update Sekarang') }}
+										</button>
+									</div>
+								</div>
+							</div>
 						</div>
 						<p v-if="profileName" class="text-[9px] sm:text-xs text-gray-500 truncate hidden sm:block mt-0.5">{{ profileName }}</p>
 					</div>
@@ -326,9 +370,29 @@ import LanguageSwitcher from "@/components/common/LanguageSwitcher.vue"
 import { DEFAULT_LOCALE } from "@/utils/currency"
 import { ref } from "vue"
 import { version } from "../../../package.json"
+import { useAppUpdate } from "@/composables/useAppUpdate"
 
 const showCacheTooltip = ref(false)
 const appVersion = version
+
+const { updateReady, updateVersion, installNow } = useAppUpdate()
+const showUpdatePopover = ref(false)
+
+function installUpdateNow() {
+	showUpdatePopover.value = false
+	installNow()
+}
+
+function handleUpdateBlur(event) {
+	if (
+		!event.relatedTarget ||
+		!event.currentTarget.parentElement.contains(event.relatedTarget)
+	) {
+		setTimeout(() => {
+			showUpdatePopover.value = false
+		}, 200)
+	}
+}
 
 const emit = defineEmits([
 	"sync-click",
