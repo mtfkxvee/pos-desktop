@@ -1,6 +1,6 @@
 {
   "name": "pos-desktop",
-  "version": "0.1.0",
+  "version": "1.1.38",
   "description": "Offline-first Electron desktop POS client for pos_next (Frappe/ERPNext)",
   "private": true,
   "main": "main/index.js",
@@ -11,6 +11,7 @@
     "dist": "npm run build:renderer && electron-builder --win"
   },
   "dependencies": {
+    "electron-updater": "^6.8.9",
     "express": "^4.21.0",
     "node-thermal-printer": "^4.6.0"
   },
