@@ -137,6 +137,7 @@ function startServer({ port = 8871, dbPath } = {}) {
       customers: { count: count("customers"), lastSyncedAt: syncState.customers || null },
       taxes: { count: count("pos_taxes"), lastSyncedAt: latestFetchedAt("pos_taxes") },
       paymentMethods: { count: count("payment_methods"), lastSyncedAt: latestFetchedAt("payment_methods") },
+      offers: { count: count("offers"), lastSyncedAt: syncState.offers || null },
       posProfiles: { count: count("pos_profiles") },
       invoiceQueue: getQueueStatus(),
       customerQueue: {

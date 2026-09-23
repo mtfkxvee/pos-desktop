@@ -157,6 +157,51 @@ async function pullPaymentMethods(posProfile) {
   return { count: (methods || []).length };
 }
 
+/**
+ * Promotional offers (pos_next.api.offers.get_offers) — was never actually
+ * pulled/cached despite the `offers` table existing in schema.sql and
+ * GET /cache/offers already reading from it: renderer/src/stores/posOffers.js
+ * calls offlineWorker.cacheOffers() after every successful online fetch, but
+ * that was wired as a permanent no-op (the comment next to it assumed offers
+ * were covered by "the server's own pull cycle" like items/customers — they
+ * weren't). Net effect: the `offers` table was permanently empty, so any
+ * offline shift saw zero promos even when some were configured, silently.
+ *
+ * Full-refetch per profile (delete + reinsert), same as taxes/payment
+ * methods — the offer list is small and this is simplest way to also drop
+ * offers the server no longer returns (expired/deactivated), which a
+ * pure upsert would otherwise leave behind forever.
+ */
+async function pullOffers(posProfile) {
+  const offers = await callMethod("pos_next.api.offers.get_offers", {
+    pos_profile: posProfile,
+  });
+  const rows = offers || [];
+  const db = getDb();
+  const insert = db.prepare(
+    `INSERT INTO offers (name, pos_profile, valid_upto, modified, data) VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(name) DO UPDATE SET pos_profile = excluded.pos_profile,
+       valid_upto = excluded.valid_upto, modified = excluded.modified, data = excluded.data`
+  );
+  const now = new Date().toISOString();
+  // node:sqlite's DatabaseSync has no .transaction() helper (that's a
+  // better-sqlite3-only API) — raw BEGIN/COMMIT/ROLLBACK, same as
+  // pullItems() above, is the actual API this project's db/client.js uses.
+  db.exec("BEGIN");
+  try {
+    db.prepare("DELETE FROM offers WHERE pos_profile = ?").run(posProfile);
+    for (const o of rows) {
+      insert.run(o.name, posProfile, o.valid_upto || null, now, JSON.stringify(o));
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+  setSyncState("offers", { lastModified: null, lastSyncedAt: now });
+  return { count: rows.length };
+}
+
 async function pullPosProfile(posProfile) {
   const data = await callMethod("pos_next.api.pos_profile.get_pos_profile_data", {
     pos_profile: posProfile,
@@ -301,12 +346,13 @@ async function pullAll() {
   }
   const posProfile = device.posProfile;
 
-  const [items, customers, taxes, paymentMethods, posProfileData, pinnedItems, pinnedCategories] = await Promise.all([
+  const [items, customers, taxes, paymentMethods, posProfileData, offers, pinnedItems, pinnedCategories] = await Promise.all([
     pullItems(posProfile),
     pullCustomers(posProfile),
     pullTaxes(posProfile),
     pullPaymentMethods(posProfile),
     pullPosProfile(posProfile),
+    pullOffers(posProfile).catch((err) => ({ error: err.message })),
     pullPinnedItems(posProfile).catch((err) => ({ error: err.message })),
     pullPinnedCategories(posProfile).catch((err) => ({ error: err.message })),
   ]);
@@ -324,6 +370,7 @@ async function pullAll() {
     taxes,
     paymentMethods,
     posProfileData,
+    offers,
     pinnedItems,
     pinnedCategories,
     printFormat,
@@ -338,6 +385,7 @@ module.exports = {
   pullTaxes,
   pullPaymentMethods,
   pullPosProfile,
+  pullOffers,
   pullPrintFormat,
   pullCompanyAddress,
   pullPinnedItems,
