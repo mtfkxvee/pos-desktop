@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu } = require("electron");
 const path = require("path");
 const { startServer } = require("../server");
+const { autoUpdater } = require("electron-updater");
 
 app.setName("pos-desktop");
 
@@ -22,6 +23,38 @@ Menu.setApplicationMenu(null);
 
 let mainWindow;
 let loginWindow;
+
+// Auto-update: checks the GitHub Releases feed configured in
+// electron-builder.yml's `publish` block. Deliberately does NOT force a
+// restart mid-check — checkForUpdatesAndNotify() downloads in the
+// background and only installs the next time the app quits (electron-updater
+// hooks app 'before-quit' for this itself), so a cashier mid-shift is never
+// interrupted by an update popping up. Only runs on a packaged build:
+// app.isPackaged is false when running via `npm run dev`/`electron .` from
+// source, where there's no published feed to check against anyway (it would
+// just throw "Cannot find latest.yml").
+function initAutoUpdate() {
+  if (!app.isPackaged) return;
+
+  autoUpdater.autoDownload = true;
+  autoUpdater.autoInstallOnAppQuit = true;
+
+  autoUpdater.on("error", (err) => {
+    // Never fatal — an outlet with no internet right now, or between
+    // releases, should just keep running the version it already has.
+    console.error("[autoUpdater] error:", err?.message || err);
+  });
+  autoUpdater.on("update-available", (info) => {
+    console.log(`[autoUpdater] update available: v${info.version} — downloading in background`);
+  });
+  autoUpdater.on("update-downloaded", (info) => {
+    console.log(`[autoUpdater] v${info.version} downloaded — will install next time the app quits`);
+  });
+
+  autoUpdater.checkForUpdatesAndNotify().catch((err) => {
+    console.error("[autoUpdater] checkForUpdatesAndNotify failed:", err?.message || err);
+  });
+}
 
 const APP_ICON = path.join(__dirname, "..", "build", "icon.png");
 
@@ -56,10 +89,22 @@ function openMainWindow() {
     width: 1280,
     height: 800,
     icon: APP_ICON,
+    // A plain BrowserWindow paints solid white the instant it's created and
+    // stays that way until the page's first real frame — visible as a
+    // "blank white" flash right after login, worse on a heavier bundle
+    // (POSSale's chunk) or a slow first paint. backgroundColor swaps that
+    // white for the same gray-50 the app's own loading states use, and
+    // show:false + ready-to-show only reveals the window once Chromium has
+    // something real to show, instead of the still-white shell.
+    backgroundColor: "#f9fafb",
+    show: false,
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.js"),
     },
+  });
+  mainWindow.once("ready-to-show", () => {
+    mainWindow?.show();
   });
   mainWindow.on("closed", () => {
     mainWindow = null;
@@ -100,10 +145,18 @@ function openLoginWindow() {
     resizable: false,
     maximizable: false,
     icon: APP_ICON,
+    // Same white-flash fix as openMainWindow — login.html's background is
+    // a baked-in image, so a flash of solid white before it loads is even
+    // more visible here than a plain color would be.
+    backgroundColor: "#f9fafb",
+    show: false,
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "login-preload.js"),
     },
+  });
+  loginWindow.once("ready-to-show", () => {
+    loginWindow?.show();
   });
   loginWindow.on("closed", () => {
     loginWindow = null;
@@ -115,6 +168,8 @@ function openLoginWindow() {
 async function bootstrap() {
   const dbPath = path.join(app.getPath("userData"), "pos-desktop.sqlite3");
   await startServer({ port: 8871, dbPath });
+
+  initAutoUpdate();
 
   // The active session lives only in the server's in-memory state (see
   // server/auth/device-setup.js), which always starts empty on process

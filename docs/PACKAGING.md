@@ -42,6 +42,45 @@ Repeat with a different `appId`/`productName` per outlet as needed.
     PowerShell route, which is both simpler and needs zero native
     compilation anywhere, including on this dev machine.
 
+## Releasing an update (auto-update)
+
+The default-identity build (`npm run dist`, no per-outlet override — see
+above) auto-updates itself via `electron-updater`, checking this repo's
+GitHub Releases on every app start (`main/index.js`'s `initAutoUpdate()`).
+It downloads a newer version in the background and installs it the next
+time the app quits — never mid-shift, no cashier action needed.
+
+**Requires this repo to be public** (or `GH_TOKEN` set at publish/runtime
+for a private one — deliberately not done here: baking a token into an
+app handed out to outlets means anyone with the installer can extract and
+reuse it).
+
+To ship an update:
+
+1. Bump `version` in `package.json` **and** `renderer/package.json` (both —
+   `renderer/package.json`'s isn't read by electron-builder, but keeping
+   them in lockstep avoids confusion about which build a given renderer
+   bundle came from).
+2. `npm run dist` — besides the installer, this also produces
+   `dist-installer/latest.yml`, which is what tells already-installed
+   copies of the app a new version exists.
+3. Publish a GitHub Release tagged `v<version>` (matching `package.json`)
+   and upload **both** the `.exe` and `latest.yml` from `dist-installer/`
+   as release assets. `electron-builder`'s own `--publish always` flag can
+   do steps 2–3 in one go if a `GH_TOKEN` with `repo` scope is set in the
+   *build* environment (never shipped in the app itself):
+   ```bash
+   GH_TOKEN=<token with repo scope> npm run dist -- --publish always
+   ```
+4. Outlets already running the app pick it up on their next check
+   (app start) and install it on their next quit — nothing to send them
+   manually.
+
+Per-outlet custom builds (different `appId`/`productName`) do **not** go
+through this feed as-is — they'd need their own release channel
+(`publish.channel` per build, or a separate repo) since GitHub Releases has
+one feed per repo, not per `appId`.
+
 ## What's NOT packaged
 
 `renderer/src` and `renderer/node_modules` are excluded — only the built

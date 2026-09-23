@@ -31,6 +31,17 @@ files:
 
 extraResources: []
 
+# Auto-update feed (see main/index.js's autoUpdater wiring). GitHub Releases
+# as the provider — electron-updater reads this repo's latest published
+# Release for a matching .exe + its auto-generated latest.yml. Requires the
+# repo to be public (or GH_TOKEN set at build/runtime for a private one —
+# NOT done here deliberately: baking a token into an app handed out to
+# outlets means anyone with the installer can extract and reuse it).
+publish:
+  provider: github
+  owner: mtfkxvee
+  repo: pos-desktop
+
 # SQLite DB file, credentials, and device config live in userData — never
 # touched by the installer/uninstaller.
 #

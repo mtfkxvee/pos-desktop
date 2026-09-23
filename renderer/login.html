@@ -46,12 +46,6 @@
         color: #6b6b6b;
         font-size: 0.82rem;
       }
-      #device-info {
-        color: #7a4fa8;
-        font-size: 0.8rem;
-        font-weight: 600;
-        margin-bottom: 0.5rem;
-      }
 
       label {
         display: block;
@@ -107,7 +101,6 @@
     <div id="login-card">
       <h2 id="title">Login Kasir</h2>
       <p id="subtitle"></p>
-      <div id="device-info"></div>
 
       <form id="login-form">
         <div id="setup-fields" class="hidden">
@@ -142,7 +135,6 @@
       const setupFields = document.getElementById("setup-fields");
       const title = document.getElementById("title");
       const subtitle = document.getElementById("subtitle");
-      const deviceInfo = document.getElementById("device-info");
 
       let deviceConfigured = false;
 
@@ -155,7 +147,6 @@
           if (deviceConfigured) {
             title.textContent = "Login Kasir";
             subtitle.textContent = "Masukkan username dan password Anda.";
-            deviceInfo.textContent = `Outlet: ${status.device.outletCode} · ${status.device.posProfile}`;
             setupFields.classList.add("hidden");
             for (const el of setupFields.querySelectorAll("input")) el.required = false;
           } else {
