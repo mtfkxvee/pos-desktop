@@ -89,7 +89,7 @@
 			</div>
 		</button>
 
-		<!-- Delivery Note -->
+		<!-- Delivery Request -->
 		<button
 			@click="handleMenuClick('delivery_notes')"
 			:class="[
@@ -98,11 +98,34 @@
 					? 'bg-sky-100 text-sky-600'
 					: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
 			]"
-			:title="__('Delivery Note')"
+			:title="__('Delivery Request')"
 		>
 			<TruckIcon class="w-6 h-6" />
 			<div class="absolute start-full ms-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
-				{{ __('Delivery Note') }}
+				{{ __('Delivery Request') }}
+			</div>
+		</button>
+
+		<!-- Online Order -->
+		<button
+			@click="handleMenuClick('online_orders')"
+			:class="[
+				'w-12 h-12 rounded-lg flex items-center justify-center transition-all relative group',
+				activeMenu === 'online_orders'
+					? 'bg-orange-100 text-orange-600'
+					: 'text-gray-600 hover:bg-gray-100 hover:text-gray-900'
+			]"
+			:title="__('Online Order')"
+		>
+			<GlobeAltIcon class="w-6 h-6" />
+			<span
+				v-if="pendingOnlineOrderCount > 0"
+				class="absolute -top-1 -end-1 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold leading-none"
+			>
+				{{ pendingOnlineOrderCount > 99 ? '99+' : pendingOnlineOrderCount }}
+			</span>
+			<div class="absolute start-full ms-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+				{{ __('Online Order') }}
 			</div>
 		</button>
 
@@ -161,12 +184,17 @@ import {
 	ClipboardDocumentCheckIcon,
 	TruckIcon,
 	PrinterIcon,
+	GlobeAltIcon,
 } from "@heroicons/vue/24/outline"
 
 defineProps({
 	isSyncing: {
 		type: Boolean,
 		default: false,
+	},
+	pendingOnlineOrderCount: {
+		type: Number,
+		default: 0,
 	},
 })
 

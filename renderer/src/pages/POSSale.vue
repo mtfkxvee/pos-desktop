@@ -167,7 +167,7 @@
 					</button>
 					<!-- Version -->
 					<div class="px-4 py-2 text-center border-t border-gray-100">
-						<span class="text-[10px] text-gray-400 font-mono">NURSA POS v{{ appVersion }}</span>
+						<span class="text-[10px] text-gray-400 font-mono">NursaPOS v{{ appVersion }}</span>
 					</div>
 				</template>
 			</POSHeader>
@@ -180,6 +180,7 @@
 			>
 				<!-- Icon-Only Management Slider - Always Visible -->
 				<ManagementSlider
+					:pending-online-order-count="pendingOnlineOrderCount"
 					@menu-clicked="handleManagementMenuClick"
 					@sync-clicked="handleSyncClick"
 				/>
@@ -479,7 +480,7 @@
 						</svg>
 					</div>
 					<h3 class="mt-4 text-lg font-medium text-gray-900">
-						{{ __("Welcome to NURSA POS") }}
+						{{ __("Welcome to NursaPOS") }}
 					</h3>
 					<p class="mt-2 text-sm text-gray-500">
 						{{ __("Please open a shift to start making sales") }}
@@ -714,10 +715,19 @@
 				:currency="shiftStore.profileCurrency"
 			/>
 
-			<!-- Delivery Note -->
-			<DeliveryNoteManagement
+			<!-- Delivery Request -->
+			<DeliveryRequestManagement
 				v-model="showDeliveryNotes"
 				:pos-profile="shiftStore.profileName"
+				:currency="shiftStore.profileCurrency"
+				:open-detail-name="deliveryRequestDetailToOpen"
+			/>
+
+			<!-- Online Order -->
+			<OnlineOrderManagement
+				v-model="showOnlineOrders"
+				:pos-profile="shiftStore.profileName"
+				:pos-opening-shift="shiftStore.currentShift?.name"
 				:currency="shiftStore.profileCurrency"
 			/>
 
@@ -734,6 +744,7 @@
 				@load-draft="handleLoadDraftFromManagement"
 				@delete-draft="handleDeleteDraft"
 				@refresh-history="draftsStore.loadDrafts"
+				@delivery-request-created="handleDeliveryRequestCreated"
 			/>
 
 			<!-- Invoice Detail Dialog -->
@@ -897,7 +908,7 @@
 								{{ __("Sign Out?") }}
 							</h3>
 							<p class="text-sm text-gray-600">
-								{{ __("You will be logged out of NURSA POS") }}
+								{{ __("You will be logged out of NursaPOS") }}
 							</p>
 						</div>
 
@@ -1146,7 +1157,8 @@ import PrinterSettingsDialog from "@/components/pos/PrinterSettingsDialog.vue";
 import InvoiceManagement from "@/components/invoices/InvoiceManagement.vue";
 import JournalEntryManagement from "@/components/journal/JournalEntryManagement.vue";
 import POSClosingManagement from "@/components/journal/POSClosingManagement.vue";
-import DeliveryNoteManagement from "@/components/journal/DeliveryNoteManagement.vue";
+import DeliveryRequestManagement from "@/components/journal/DeliveryRequestManagement.vue";
+import OnlineOrderManagement from "@/components/journal/OnlineOrderManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
 import { usePOSEvents } from "@/composables/usePOSEvents";
@@ -1284,6 +1296,9 @@ const showInvoiceManagement = ref(false);
 const showJournalEntry = ref(false);
 const showPOSClosing = ref(false);
 const showDeliveryNotes = ref(false);
+const showOnlineOrders = ref(false);
+const pendingOnlineOrderCount = ref(0);
+const deliveryRequestDetailToOpen = ref("");
 
 // Discount auth dialog (rendered here, outside PaymentDialog, to avoid frappe-ui focus trap)
 const paymentDialogRef = ref(null);
@@ -3245,8 +3260,46 @@ function handleManagementMenuClick(menuItem) {
 		showPOSClosing.value = true;
 	} else if (menuItem === "delivery_notes") {
 		showDeliveryNotes.value = true;
+	} else if (menuItem === "online_orders") {
+		showOnlineOrders.value = true;
 	}
 }
+
+// Online Order badge count (Sales Orders not yet invoiced, for this outlet)
+async function loadPendingOnlineOrderCount() {
+	if (!shiftStore.profileName) return;
+	try {
+		pendingOnlineOrderCount.value = await call(
+			"pos_next.api.sales_orders.get_pending_sales_orders_count",
+			{ pos_profile: shiftStore.profileName },
+		) || 0;
+	} catch (error) {
+		log.error("Failed to load pending online order count:", error);
+	}
+}
+
+watch(() => shiftStore.profileName, (profile) => {
+	if (profile) loadPendingOnlineOrderCount();
+}, { immediate: true });
+
+// Refresh the badge count after the Online Order dialog is closed (Siapkan
+// inside it may have reduced how many orders are still pending).
+watch(showOnlineOrders, (isOpen, wasOpen) => {
+	if (!isOpen && wasOpen) loadPendingOnlineOrderCount();
+});
+
+// Opens the Delivery Request popup straight at the just-created record, so
+// the outlet team can fill in delivery location/details right away.
+function handleDeliveryRequestCreated(deliveryRequestName) {
+	deliveryRequestDetailToOpen.value = deliveryRequestName;
+	showDeliveryNotes.value = true;
+}
+
+// Clear the "open straight to this detail" target once the dialog is closed,
+// so a normal sidebar click next time opens the list as usual.
+watch(showDeliveryNotes, (isOpen, wasOpen) => {
+	if (!isOpen && wasOpen) deliveryRequestDetailToOpen.value = "";
+});
 
 // Load invoice history data
 async function loadInvoiceHistoryData() {
