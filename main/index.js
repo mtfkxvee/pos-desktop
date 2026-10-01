@@ -222,6 +222,17 @@ ipcMain.on("install-update-now", () => {
   autoUpdater.quitAndInstall();
 });
 
+// Pull-based complement to the push in notifyMainWindowOfUpdate(): a
+// download can (and in testing, reliably does) finish before POSHeader.vue
+// has even mounted — e.g. while still on the login screen, or while
+// App.vue's own initial-sync gate is still resolving — so the one-shot
+// `webContents.send("update-ready", ...)` on 'ready-to-show' fires before
+// any renderer-side listener exists to catch it, and that message is just
+// dropped (Electron IPC doesn't queue for late listeners). useAppUpdate.js
+// calls this once on mount to pick up whatever was already downloaded,
+// instead of only ever waiting for a live push it may have already missed.
+ipcMain.handle("get-pending-update", () => pendingUpdateInfo);
+
 app.whenReady().then(bootstrap);
 
 app.on("window-all-closed", () => {

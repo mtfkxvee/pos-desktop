@@ -10,5 +10,9 @@ contextBridge.exposeInMainWorld("posDesktop", {
   onUpdateReady: (callback) => {
     ipcRenderer.on("update-ready", (_event, info) => callback(info));
   },
+  // Pull counterpart to onUpdateReady — catches an update that finished
+  // downloading before this window had a listener attached (see
+  // main/index.js's get-pending-update handler for why that happens).
+  getPendingUpdate: () => ipcRenderer.invoke("get-pending-update"),
   installUpdateNow: () => ipcRenderer.send("install-update-now"),
 });

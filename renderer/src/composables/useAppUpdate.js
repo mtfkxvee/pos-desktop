@@ -16,13 +16,24 @@ const updateReady = ref(false)
 const updateVersion = ref(null)
 let listenerAttached = false
 
+function applyInfo(info) {
+	if (!info) return
+	updateVersion.value = info.version || null
+	updateReady.value = true
+}
+
 function attachListener() {
 	if (listenerAttached || !window.posDesktop?.onUpdateReady) return
 	listenerAttached = true
-	window.posDesktop.onUpdateReady((info) => {
-		updateVersion.value = info?.version || null
-		updateReady.value = true
-	})
+
+	// Live push — covers a download that finishes while this window is
+	// already open and listening.
+	window.posDesktop.onUpdateReady(applyInfo)
+
+	// One-time pull on attach — covers a download that already finished
+	// (and was sent, and dropped) before this listener existed, e.g. while
+	// still on the login screen or during App.vue's initial-sync gate.
+	window.posDesktop.getPendingUpdate?.().then(applyInfo)
 }
 
 export function useAppUpdate() {
