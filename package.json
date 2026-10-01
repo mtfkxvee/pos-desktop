@@ -1,6 +1,6 @@
 {
   "name": "pos-desktop",
-  "version": "1.1.39",
+  "version": "1.1.40",
   "description": "Offline-first Electron desktop POS client for pos_next (Frappe/ERPNext)",
   "private": true,
   "main": "main/index.js",

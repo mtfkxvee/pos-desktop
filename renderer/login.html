@@ -69,6 +69,42 @@
         border-color: #8b4fc7;
       }
 
+      .password-field {
+        position: relative;
+        margin-top: 0.25rem;
+      }
+      .password-field input {
+        margin-top: 0;
+        padding-right: 2.25rem;
+      }
+      .password-toggle {
+        position: absolute;
+        right: 0.4rem;
+        top: 50%;
+        transform: translateY(-50%);
+        width: 1.6rem;
+        height: 1.6rem;
+        padding: 0;
+        margin: 0;
+        border: none;
+        background: transparent;
+        color: #8a8a8a;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        border-radius: 6px;
+      }
+      .password-toggle:hover {
+        color: #5f2f96;
+        background: rgba(139, 79, 199, 0.1);
+        opacity: 1;
+      }
+      .password-toggle svg {
+        width: 1.1rem;
+        height: 1.1rem;
+      }
+
       button {
         margin-top: 1.25rem;
         padding: 0.65rem 1rem;
@@ -122,7 +158,19 @@
           <input type="text" name="usr" required autofocus />
         </label>
         <label>Password
-          <input type="password" name="pwd" required />
+          <div class="password-field">
+            <input type="password" name="pwd" id="pwd-input" required />
+            <button type="button" class="password-toggle" id="pwd-toggle" aria-label="Tampilkan password" title="Tampilkan password">
+              <svg id="pwd-icon-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                <circle cx="12" cy="12" r="3" />
+              </svg>
+              <svg id="pwd-icon-hide" class="hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a21.3 21.3 0 015.17-6.17M9.9 4.24A10.94 10.94 0 0112 4c7 0 11 8 11 8a21.3 21.3 0 01-3.22 4.44M14.12 14.12a3 3 0 11-4.24-4.24" />
+                <line x1="1" y1="1" x2="23" y2="23" />
+              </svg>
+            </button>
+          </div>
         </label>
         <button type="submit">Login</button>
       </form>
@@ -135,6 +183,21 @@
       const setupFields = document.getElementById("setup-fields");
       const title = document.getElementById("title");
       const subtitle = document.getElementById("subtitle");
+
+      const pwdInput = document.getElementById("pwd-input");
+      const pwdToggle = document.getElementById("pwd-toggle");
+      const pwdIconShow = document.getElementById("pwd-icon-show");
+      const pwdIconHide = document.getElementById("pwd-icon-hide");
+
+      pwdToggle.addEventListener("click", () => {
+        const showing = pwdInput.type === "text";
+        pwdInput.type = showing ? "password" : "text";
+        pwdIconShow.classList.toggle("hidden", !showing);
+        pwdIconHide.classList.toggle("hidden", showing);
+        const label = showing ? "Tampilkan password" : "Sembunyikan password";
+        pwdToggle.setAttribute("aria-label", label);
+        pwdToggle.title = label;
+      });
 
       let deviceConfigured = false;
 
