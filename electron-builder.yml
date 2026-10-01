@@ -75,6 +75,18 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
+  # No spaces in the built filename, deliberately — GitHub Releases renames
+  # spaces in an uploaded asset's name to periods ("My App.exe" ->
+  # "My.App.exe"), but electron-updater's own GitHubProvider.resolveFiles()
+  # renames spaces in latest.yml's filename to hyphens when building the
+  # download URL (see node_modules/electron-updater/out/providers/
+  # GitHubProvider.js — "still replace space to - due to backward
+  # compatibility"). Those two don't agree, so an installer name with
+  # spaces in it 404s on auto-update every single release. Default
+  # electron-builder artifactName is "${productName} Setup ${version}.${ext}"
+  # — the literal " Setup " is what introduced the spaces here, independent
+  # of productName itself already being one word.
+  artifactName: "${productName}-Setup-${version}.${ext}"
 
 # Each outlet's build gets a distinct appId/productName (see env vars above),
 # so installs on different outlet machines never collide, and Windows treats
