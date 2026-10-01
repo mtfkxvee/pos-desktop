@@ -37,7 +37,7 @@ export function exportBackupToFile(pendingInvoices) {
 	const exportData = {
 		version: 1,
 		exported_at: new Date().toISOString(),
-		app: "NURSA POS",
+		app: "NursaPOS",
 		type: "pos_offline_backup",
 		invoices: pendingInvoices.map((inv) => ({
 			offline_id: inv.offline_id,

@@ -243,7 +243,7 @@ export function parseError(error) {
  */
 export function formatErrorReport(errorContext, additionalInfo = {}) {
 	const lines = [
-		__("Error Report - NURSA POS"),
+		__("Error Report - NursaPOS"),
 		"=".repeat(40),
 		__("Title: {0}", [errorContext.title]),
 		__("Type: {0}", [errorContext.type]),

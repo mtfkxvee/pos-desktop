@@ -7,20 +7,26 @@ npm run dist
 ```
 
 Produces an NSIS installer (`dist-installer/*.exe`) with `appId: id.nursa.pos.desktop`,
-`productName: POS Desktop` (from `electron-builder.yml`).
+`productName: NursaPOS` (from `electron-builder.yml`).
 
-## Per-outlet builds (different name/identity)
-
-Windows treats apps with a different `productName`/`appId` as fully separate
-installs (own Start Menu entry, own userData folder — so device config/API
-keys never collide between outlets built from the same source):
+## Per-outlet builds (different display name)
 
 ```bash
 npm run build:renderer
 npx electron-builder --win -c.appId=id.nursa.pos.jkt01 -c.productName="POS Kasir - Toko Jakarta"
 ```
 
-Repeat with a different `appId`/`productName` per outlet as needed.
+`productName` changes the installer file name, Start Menu entry, and window
+title — cosmetic only. **It does NOT give each outlet its own userData
+folder** (a past version of this doc claimed it did): `main/index.js` calls
+`app.setName("pos-desktop")` explicitly, and that hardcoded name — not
+`productName` — is what Electron derives `app.getPath("userData")` from.
+Every build from this source, whatever `productName`/`appId` it was built
+with, reads/writes the **same** `%APPDATA%\pos-desktop\` folder on a given
+machine. That's fine (intended, even) for one outlet's own machine, but
+never install two differently-`productName`'d builds from this source on
+the *same* Windows user account expecting separate data — they'd collide
+on one shared SQLite DB/device config instead.
 
 ## Before shipping to a real outlet
 

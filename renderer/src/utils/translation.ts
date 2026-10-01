@@ -1,5 +1,5 @@
 /**
- * @fileoverview Translation system for NURSA POS with offline support.
+ * @fileoverview Translation system for NursaPOS with offline support.
  *
  * This module provides:
  * - Vue plugin for global `__()` translation function

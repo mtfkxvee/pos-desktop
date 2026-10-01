@@ -1,5 +1,5 @@
 /**
- * Currency Utility for NURSA POS
+ * Currency Utility for NursaPOS
  * Handles formatting and rounding with ERPNext System Settings compatibility
  *
  * Rounding Methods (matches frappe/utils/data.py):

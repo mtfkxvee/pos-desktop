@@ -1,4 +1,14 @@
-# electron-builder config for POS Desktop.
+# electron-builder config for NursaPOS.
+#
+# appId is deliberately NOT "renamed" alongside productName below — it's
+# what electron-updater/NSIS use to recognize "this is the same app, just a
+# newer version" across releases, and (separately) main/index.js's
+# app.setName("pos-desktop") — not productName — is what decides
+# app.getPath("userData"). Changing either would make already-installed
+# outlets look like a fresh, unconfigured device after their next update
+# (old local DB/credentials still on disk, just under a folder name the
+# app stops looking in). productName only affects the installer file name,
+# Start Menu entry, and window title — safe to change on its own.
 #
 # Per-outlet builds: override productName/appId via env vars before building,
 # e.g.:
@@ -9,7 +19,7 @@
 # reliably across versions). See docs/PACKAGING.md for the exact command:
 #   npx electron-builder --win -c.appId=... -c.productName="..."
 appId: id.nursa.pos.desktop
-productName: POS Desktop
+productName: NursaPOS
 copyright: Copyright © 2026
 
 directories:
@@ -56,7 +66,7 @@ win:
     - target: nsis
       arch:
         - x64
-  # NURSA POS logo — electron-builder auto-generates the multi-resolution
+  # NursaPOS logo — electron-builder auto-generates the multi-resolution
   # .ico from this 500x500 PNG at build time (no manual conversion needed).
   icon: build/icon.png
 
