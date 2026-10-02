@@ -761,6 +761,7 @@
 			<SyncStatusDialog
 				v-if="showSyncStatusDialog"
 				@close="showSyncStatusDialog = false"
+				@open-offline-invoices="handleOpenOfflineInvoicesFromSync"
 			/>
 
 			<!-- Print Format Dialog -->
@@ -3015,6 +3016,23 @@ async function confirmClearCache() {
 
 		showError(__("Failed to clear cache. Please try again."));
 	}
+}
+
+// "Lihat & Transaksi Ulang" button on the Sync Status dialog's failed-queue
+// card — jumps straight to the Offline Invoices dialog (which already has
+// per-invoice detail, retry, and the edit-to-cart re-transact flow below)
+// instead of leaving the cashier stuck looking at a bare failure count with
+// no way to act on it.
+function handleOpenOfflineInvoicesFromSync() {
+	showSyncStatusDialog.value = false;
+	uiStore.showOfflineInvoicesDialog = true;
+	// OfflineInvoicesDialog only displays whatever it's handed via
+	// pendingInvoices — it never fetches on its own (see its `watch(show, ...)`,
+	// which just re-reads the prop). Every other entry point into this dialog
+	// pairs the `show = true` with this same call; missing it here is what
+	// made the dialog open to a false "No pending offline invoices" even
+	// though server/routes/invoices.js's /queue had real rows.
+	offlineStore.loadPendingInvoices();
 }
 
 async function handleEditOfflineInvoice(invoice) {

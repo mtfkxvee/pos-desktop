@@ -114,6 +114,14 @@
 								overview.customerQueue.pending, overview.customerQueue.failed,
 							]) }}
 						</p>
+						<button
+							v-if="overview.invoiceQueue.pending > 0 || overview.invoiceQueue.failed > 0"
+							@click="$emit('open-offline-invoices')"
+							class="mt-3 w-full px-3 py-2 text-sm font-semibold rounded-lg bg-orange-600 hover:bg-orange-700 text-white transition-colors flex items-center justify-center gap-2"
+						>
+							<DocumentTextIcon class="w-4 h-4" />
+							{{ __('Lihat & Transaksi Ulang') }}
+						</button>
 					</div>
 					<div v-else class="p-4 bg-green-50 border border-green-100 rounded-xl flex items-center gap-2">
 						<CheckCircleIcon class="w-5 h-5 text-green-600" />
@@ -147,7 +155,7 @@ import {
 } from "@heroicons/vue/24/outline"
 import { useToast } from "@/composables/useToast"
 
-defineEmits(["close"])
+defineEmits(["close", "open-offline-invoices"])
 const { showSuccess, showError } = useToast()
 
 const BASE = "http://127.0.0.1:8871"
