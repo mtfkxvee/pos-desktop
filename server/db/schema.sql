@@ -152,6 +152,23 @@ CREATE TABLE IF NOT EXISTS invoice_id_map (
   synced_at TEXT NOT NULL
 );
 
+-- Shifts opened while offline. offline_name is a provisional id that queued
+-- invoices reference; once create_opening_shift succeeds, server_name holds the
+-- real POS Opening Shift name and invoices are rewritten to point at it.
+CREATE TABLE IF NOT EXISTS shift_queue (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  offline_name TEXT UNIQUE NOT NULL,  -- e.g. OFFLINE-SHIFT-<uuid>
+  status TEXT NOT NULL DEFAULT 'pending', -- pending | synced
+  pos_profile TEXT NOT NULL,
+  company TEXT,
+  payload TEXT NOT NULL,              -- JSON: {balance_details, period_start_date}
+  server_name TEXT,
+  retry_count INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
 -- Offline-created customers, synced via frappe.client.insert once online.
 CREATE TABLE IF NOT EXISTS customer_queue (
   id INTEGER PRIMARY KEY AUTOINCREMENT,

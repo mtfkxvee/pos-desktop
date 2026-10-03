@@ -1,6 +1,7 @@
 const { getDb } = require("../db/client");
 const { callMethod } = require("../frappe-client");
 const { pingServer } = require("./ping");
+const { pushQueuedShifts, resolveShiftName, isShiftPending } = require("./shifts");
 
 const MAX_RETRY_COUNT = 3;
 const MAX_IN_PROGRESS_RETRIES = 3;
@@ -78,6 +79,9 @@ async function syncInvoiceToServer(row, retryCount = 0) {
   }
 
   const payload = JSON.parse(row.payload);
+  if (payload.invoice?.posa_pos_opening_shift) {
+    payload.invoice.posa_pos_opening_shift = resolveShiftName(payload.invoice.posa_pos_opening_shift);
+  }
 
   try {
     const response = await callMethod("pos_next.api.invoices.submit_invoice", {
@@ -117,6 +121,9 @@ async function pushQueuedInvoices() {
     // Customers first so any queued invoice referencing a temp customer id
     // gets repointed to the real one before we try to submit it.
     await pushQueuedCustomers().catch(() => {});
+    // Shifts opened offline must exist on the server before any invoice that
+    // references them is submitted.
+    await pushQueuedShifts().catch(() => {});
 
     const db = getDb();
     const rows = db
@@ -125,6 +132,11 @@ async function pushQueuedInvoices() {
 
     const result = { success: 0, failed: 0, skipped: 0, errors: [] };
     for (const row of rows) {
+      const shiftName = JSON.parse(row.payload).invoice?.posa_pos_opening_shift;
+      if (isShiftPending(shiftName)) {
+        result.skipped++;
+        continue;
+      }
       try {
         const r = await syncInvoiceToServer(row);
         if (r.status === "success") result.success++;

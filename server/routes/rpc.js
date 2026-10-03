@@ -2,6 +2,13 @@ const express = require("express");
 const { callMethod } = require("../frappe-client");
 const { pingServer } = require("../sync/ping");
 const { getDb } = require("../db/client");
+const { createOfflineShift, pushQueuedShifts, hasPendingShifts, remapOfflineShifts } = require("../sync/shifts");
+const { pushQueuedInvoices } = require("../sync/push");
+
+const CLOSING_METHODS = new Set([
+  "pos_next.api.shifts.get_closing_shift_data",
+  "pos_next.api.shifts.submit_closing_shift",
+]);
 const {
   pullTaxes,
   pullPaymentMethods,
@@ -194,6 +201,15 @@ const STALE_OK_FALLBACK = {
         write_off_cost_center: p.write_off_cost_center,
       }));
   },
+  // The renderer filters payments_method by `parent` === selected profile, so
+  // each cached row is tagged with the profile it was pulled for.
+  "pos_next.api.shifts.get_opening_dialog_data"() {
+    const rows = getDb().prepare("SELECT pos_profile, data FROM payment_methods").all();
+    const payments_method = rows.flatMap((r) =>
+      JSON.parse(r.data).map((m) => ({ ...m, parent: r.pos_profile }))
+    );
+    return { payments_method };
+  },
 };
 
 const SHIFT_MIRROR_METHODS = new Set([
@@ -239,7 +255,7 @@ function ensureProfileDataCached(profileName) {
 
 router.post("/:method", async (req, res) => {
   const method = req.params.method;
-  const params = req.body || {};
+  let params = req.body || {};
 
   // Offline-first: master-data reads never touch the network, so search/
   // browse is instant and identical whether online or offline. The
@@ -255,8 +271,18 @@ router.post("/:method", async (req, res) => {
   const online = await pingServer();
 
   if (!online) {
+    if (method === "pos_next.api.shifts.create_opening_shift") {
+      try {
+        return res.json({ message: createOfflineShift(params), offline: true });
+      } catch (err) {
+        return res.status(400).json({ error: err.message });
+      }
+    }
     if (STALE_OK_FALLBACK[method]) {
       return res.json({ message: STALE_OK_FALLBACK[method](params), offline: true });
+    }
+    if (CLOSING_METHODS.has(method)) {
+      return res.status(503).json({ error: "Tutup shift hanya bisa dilakukan saat online." });
     }
     return res.status(503).json({
       error: "Fitur ini butuh koneksi internet (belum didukung saat offline)",
@@ -264,7 +290,36 @@ router.post("/:method", async (req, res) => {
   }
 
   try {
+    if (CLOSING_METHODS.has(method)) {
+      if (hasPendingShifts()) await pushQueuedShifts().catch(() => {});
+      await pushQueuedInvoices().catch(() => {});
+      const pendingInvoices = getDb()
+        .prepare("SELECT COUNT(*) c FROM invoice_queue WHERE status = 'pending'")
+        .get().c;
+      if (pendingInvoices > 0) {
+        return res.status(409).json({
+          error: `Masih ada ${pendingInvoices} invoice offline yang belum tersinkron. Sinkronkan dulu sebelum tutup shift.`,
+        });
+      }
+      if (hasPendingShifts()) {
+        return res.status(409).json({
+          error: "Shift yang dibuka offline belum tersinkron ke server. Sinkronkan dulu sebelum tutup shift.",
+        });
+      }
+      params = JSON.parse(remapOfflineShifts(JSON.stringify(params)));
+    }
+    if (method === "pos_next.api.shifts.check_opening_shift" && hasPendingShifts()) {
+      await pushQueuedShifts().catch(() => {});
+    }
     const result = await callMethod(method, params);
+
+    if (
+      method === "pos_next.api.shifts.check_opening_shift" &&
+      !result?.pos_opening_shift &&
+      hasPendingShifts()
+    ) {
+      return res.json({ message: getSetting("shift_state"), offline: true });
+    }
 
     // Write-through: keep the local shift-state mirror in sync with every
     // genuine server answer, including an honest "no shift" (null) —

@@ -155,7 +155,7 @@ async function generateApiKey(baseUrl, usr, pwd) {
  *   internet happens to be down when their shift starts. A previously-seen
  *   username with a WRONG password is rejected in both cases.
  */
-async function login({ baseUrl, usr, pwd, outletCode, posProfile, defaultWarehouse }) {
+async function login({ baseUrl, usr, pwd, outletCode, posProfile }) {
   if (!usr || !pwd) {
     throw new Error("Username dan password wajib diisi");
   }
@@ -165,8 +165,8 @@ async function login({ baseUrl, usr, pwd, outletCode, posProfile, defaultWarehou
   if (!trimmedBaseUrl) {
     throw new Error("Server URL wajib diisi");
   }
-  if (!configured && (!outletCode || !posProfile || !defaultWarehouse)) {
-    throw new Error("Setup device pertama kali butuh kode outlet, POS Profile, dan default warehouse");
+  if (!configured && (!outletCode || !posProfile)) {
+    throw new Error("Setup device pertama kali butuh kode outlet dan POS Profile");
   }
 
   const cached = getUserCredentials(usr);
@@ -198,7 +198,6 @@ async function login({ baseUrl, usr, pwd, outletCode, posProfile, defaultWarehou
       baseUrl: trimmedBaseUrl,
       outletCode,
       posProfile,
-      defaultWarehouse,
       setupAt: new Date().toISOString(),
     });
   }

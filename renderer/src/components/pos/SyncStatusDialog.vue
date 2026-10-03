@@ -94,6 +94,38 @@
 						</div>
 					</div>
 
+					<!-- Shifts opened while offline -->
+					<div
+						v-for="shift in overview.offlineShifts"
+						:key="shift.offline_name"
+						class="p-4 bg-amber-50 border border-amber-200 rounded-xl space-y-3"
+					>
+						<div class="flex items-center gap-2">
+							<BuildingStorefrontIcon class="w-5 h-5 text-amber-600" />
+							<span class="font-bold text-amber-900">{{ __('Shift dibuka offline: {0}', [shift.pos_profile]) }}</span>
+						</div>
+						<p class="text-sm text-amber-800">
+							{{ __('Belum tersinkron ke server. {0} invoice menunggu shift ini.', [shift.invoice_count]) }}
+						</p>
+						<p v-if="shift.last_error" class="text-xs text-red-700 break-words">{{ shift.last_error }}</p>
+						<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+							<button
+								@click="handleRetryOfflineShifts"
+								:disabled="busyShift || !overview.online"
+								class="px-3 py-2 text-sm font-semibold rounded-lg bg-amber-600 hover:bg-amber-700 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+							>
+								{{ __('Coba Lagi') }}
+							</button>
+							<button
+								@click="handleUseActiveShift(shift)"
+								:disabled="busyShift || !overview.online"
+								class="px-3 py-2 text-sm font-semibold rounded-lg bg-white border border-amber-400 text-amber-900 hover:bg-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+							>
+								{{ __('Pakai Shift Aktif di Server') }}
+							</button>
+						</div>
+					</div>
+
 					<!-- Pending queue -->
 					<div
 						v-if="pendingTotal > 0"
@@ -154,6 +186,7 @@ import {
 	CheckCircleIcon,
 } from "@heroicons/vue/24/outline"
 import { useToast } from "@/composables/useToast"
+import { useShift } from "@/composables/useShift"
 
 defineEmits(["close", "open-offline-invoices"])
 const { showSuccess, showError } = useToast()
@@ -165,6 +198,8 @@ const syncing = ref(false)
 const syncingType = ref(null)
 const overview = ref(null)
 let pollTimer = null
+const busyShift = ref(false)
+const { checkOpeningShift } = useShift()
 
 // `type` matches server/index.js's SYNCABLE map (POST /sync/run/:type) —
 // only set for rows the outlet can manually refresh on their own (item,
@@ -235,6 +270,45 @@ async function handleSyncType(type) {
 		showError(__("Sync gagal: {0}", [e.message]))
 	} finally {
 		syncingType.value = null
+	}
+}
+
+async function handleRetryOfflineShifts() {
+	busyShift.value = true
+	try {
+		const res = await fetch(`${BASE}/sync/offline-shifts/retry`, { method: "POST" })
+		const data = await res.json()
+		if (data.shifts?.failed > 0) showError(__("Shift offline belum bisa dibuat di server. Lihat pesan error di bawah."))
+		else showSuccess(__("Shift offline berhasil disinkronkan."))
+		await checkOpeningShift.fetch()
+	} catch (e) {
+		showError(__("Gagal sinkron: {0}", [e.message]))
+	} finally {
+		busyShift.value = false
+		await loadOverview()
+	}
+}
+
+async function handleUseActiveShift(shift) {
+	const ok = window.confirm(
+		__("Invoice offline ({0}) akan dipindah ke shift yang sedang terbuka di server. Lanjutkan?", [shift.invoice_count]),
+	)
+	if (!ok) return
+	busyShift.value = true
+	try {
+		const res = await fetch(`${BASE}/sync/offline-shifts/${encodeURIComponent(shift.offline_name)}/use-active`, { method: "POST" })
+		const data = await res.json()
+		if (!res.ok || data.error) {
+			showError(data.error || __("Gagal memakai shift aktif"))
+		} else {
+			showSuccess(__("Invoice dipindah ke shift aktif di server."))
+			await checkOpeningShift.fetch()
+		}
+	} catch (e) {
+		showError(__("Gagal: {0}", [e.message]))
+	} finally {
+		busyShift.value = false
+		await loadOverview()
 	}
 }
 

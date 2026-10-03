@@ -11,6 +11,7 @@ const {
 } = require("./auth/device-setup");
 const { pingServer } = require("./sync/ping");
 const { pushQueuedInvoices, getQueueStatus } = require("./sync/push");
+const { pushQueuedShifts, listOfflineShifts, useActiveShift } = require("./sync/shifts");
 const {
   pullAll,
   pullItems,
@@ -90,7 +91,7 @@ function startServer({ port = 8871, dbPath } = {}) {
   });
 
   // Per-cashier login. First-time-ever on this device, the request body also
-  // needs outletCode/posProfile/defaultWarehouse; every login after that
+  // needs outletCode/posProfile; every login after that
   // (any cashier) just needs baseUrl(optional)/usr/pwd.
   app.post("/auth/login", async (req, res) => {
     try {
@@ -147,11 +148,25 @@ function startServer({ port = 8871, dbPath } = {}) {
       offers: { count: count("offers"), lastSyncedAt: syncState.offers || null },
       posProfiles: { count: count("pos_profiles") },
       invoiceQueue: getQueueStatus(),
+      offlineShifts: listOfflineShifts(),
       customerQueue: {
         pending: db.prepare("SELECT COUNT(*) c FROM customer_queue WHERE status='pending'").get().c,
         failed: db.prepare("SELECT COUNT(*) c FROM customer_queue WHERE status='failed'").get().c,
       },
     });
+  });
+
+  app.post("/sync/offline-shifts/retry", async (req, res) => {
+    const shifts = await pushQueuedShifts().catch((err) => ({ error: err.message }));
+    const invoices = await pushQueuedInvoices().catch((err) => ({ error: err.message }));
+    res.json({ shifts, invoices });
+  });
+
+  app.post("/sync/offline-shifts/:name/use-active", async (req, res) => {
+    const result = await useActiveShift(req.params.name);
+    if (result.error) return res.status(409).json(result);
+    const invoices = await pushQueuedInvoices().catch((err) => ({ error: err.message }));
+    res.json({ ...result, invoices });
   });
 
   // Manual sync trigger (e.g. a "sync now" button), in addition to the
