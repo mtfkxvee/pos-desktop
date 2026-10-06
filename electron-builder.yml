@@ -58,8 +58,15 @@ publish:
 # No native .node binaries ship with the app anymore (printing is done via
 # node-thermal-printer, pure JS + PowerShell RAW-print, see main/printer.js)
 # — this stays as a defensive default in case a future native dep is added.
+#
+# main/*.ps1 must also be unpacked: they're invoked via execFile("powershell.exe",
+# ["-File", ...]) — an external process that can't read files packed inside
+# app.asar (only Electron/Node's own patched fs can see into that archive).
+# Without this, printing silently breaks in every packaged build (works fine
+# in dev, where nothing is asar-packed) — see main/printer.js's scriptPath().
 asarUnpack:
   - "**/*.node"
+  - "main/*.ps1"
 
 win:
   target:

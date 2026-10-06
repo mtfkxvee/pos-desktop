@@ -35,6 +35,16 @@ function rp(v) {
   return `Rp${num(v)}`;
 }
 
+// powershell.exe is an external process — it can't read files packed inside
+// app.asar (that's a virtual archive only Electron/Node's patched fs can see
+// into). electron-builder.yml's asarUnpack copies main/*.ps1 out to a real
+// app.asar.unpacked/ directory alongside it; this resolves to that path when
+// packaged, and is a no-op in dev (where __dirname never contains app.asar).
+function scriptPath(filename) {
+  const p = path.join(__dirname, filename);
+  return p.includes("app.asar") ? p.replace("app.asar", "app.asar.unpacked") : p;
+}
+
 function buildPrinter(paperSize = "58mm") {
   // Interface value is irrelevant here — we only ever call getBuffer(),
   // never execute() against this instance, so no real transport is opened.
@@ -69,7 +79,7 @@ async function sendToWindowsPrinter(buffer, printerName) {
           "-ExecutionPolicy",
           "Bypass",
           "-File",
-          path.join(__dirname, "print-raw.ps1"),
+          scriptPath("print-raw.ps1"),
           "-PrinterName",
           printerName,
           "-FilePath",
@@ -101,7 +111,7 @@ async function sendToSerialPort(buffer, portName, baudRate) {
           "-ExecutionPolicy",
           "Bypass",
           "-File",
-          path.join(__dirname, "print-serial.ps1"),
+          scriptPath("print-serial.ps1"),
           "-PortName",
           portName,
           "-FilePath",
