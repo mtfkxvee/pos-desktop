@@ -13,7 +13,10 @@ let inFlight = null;
 // exactly the "reprint takes forever" complaint this was written to fix.
 const CACHE_TTL_MS = 5000;
 
+let lastResult = { ok: false, reason: "belum dicek", status: null, ms: null, checkedAt: null };
+
 async function pingOnce(timeoutMs) {
+  const started = Date.now();
   try {
     const baseUrl = getBaseUrl();
     const controller = new AbortController();
@@ -23,9 +26,13 @@ async function pingOnce(timeoutMs) {
       signal: controller.signal,
     });
     clearTimeout(timer);
-    return res.ok;
-  } catch {
-    return false;
+    const ms = Date.now() - started;
+    if (res.ok) return { ok: true, reason: "terhubung", status: res.status, ms };
+    return { ok: false, reason: `server membalas HTTP ${res.status}`, status: res.status, ms };
+  } catch (err) {
+    const ms = Date.now() - started;
+    const reason = err.name === "AbortError" ? `timeout setelah ${timeoutMs} ms` : err.message || String(err);
+    return { ok: false, reason, status: null, ms };
   }
 }
 
@@ -44,8 +51,8 @@ async function pingServer({ timeoutMs = 3000, fresh = false } = {}) {
   if (inFlight) return inFlight;
 
   inFlight = (async () => {
-    let ok = await pingOnce(timeoutMs);
-    if (!ok) {
+    let result = await pingOnce(timeoutMs);
+    if (!result.ok) {
       // One quick retry before declaring offline. A single failed attempt
       // was enough to flip the whole app offline (visible as the UI
       // flapping "online"/"offline" within seconds and unrelated calls
@@ -53,12 +60,13 @@ async function pingServer({ timeoutMs = 3000, fresh = false } = {}) {
       // handshake jitter or a momentarily slow response, not a genuine
       // outage. This retry is still bounded by the 5s result cache above,
       // so it can't compound into repeated back-to-back pings.
-      ok = await pingOnce(timeoutMs);
+      result = await pingOnce(timeoutMs);
     }
-    lastKnownOnline = ok;
+    lastKnownOnline = result.ok;
     lastCheckedAt = Date.now();
+    lastResult = { ...result, checkedAt: new Date().toISOString() };
     inFlight = null;
-    return ok;
+    return result.ok;
   })();
 
   return inFlight;
@@ -68,4 +76,8 @@ function isOnline() {
   return lastKnownOnline;
 }
 
-module.exports = { pingServer, isOnline };
+function getLastPingResult() {
+  return lastResult;
+}
+
+module.exports = { pingServer, isOnline, getLastPingResult };

@@ -9,7 +9,7 @@ const {
   isDeviceConfigured,
   loadDeviceConfig,
 } = require("./auth/device-setup");
-const { pingServer } = require("./sync/ping");
+const { pingServer, getLastPingResult } = require("./sync/ping");
 const { pushQueuedInvoices, getQueueStatus } = require("./sync/push");
 const { pushQueuedShifts, listOfflineShifts, useActiveShift } = require("./sync/shifts");
 const {
@@ -141,6 +141,7 @@ function startServer({ port = 8871, dbPath } = {}) {
 
     res.json({
       online,
+      onlineCheck: getLastPingResult(),
       items: { count: count("items"), lastSyncedAt: syncState.items || null },
       customers: { count: count("customers"), lastSyncedAt: syncState.customers || null },
       taxes: { count: count("pos_taxes"), lastSyncedAt: latestFetchedAt("pos_taxes") },

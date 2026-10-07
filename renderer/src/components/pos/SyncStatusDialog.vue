@@ -43,6 +43,10 @@
 											: __('Bekerja secara lokal. Akan sinkron otomatis begitu online.')
 									}}
 								</p>
+								<p v-if="overview.onlineCheck?.reason" class="text-xs text-gray-400 mt-1 break-words">
+									{{ __('Cek koneksi: {0}', [overview.onlineCheck.reason]) }}
+									<span v-if="overview.onlineCheck.ms != null">({{ overview.onlineCheck.ms }} ms)</span>
+								</p>
 							</div>
 						</div>
 						<button
