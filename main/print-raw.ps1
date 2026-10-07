@@ -10,7 +10,8 @@
 # machine with no extra install step.
 param(
   [Parameter(Mandatory = $true)][string]$PrinterName,
-  [Parameter(Mandatory = $true)][string]$FilePath
+  [Parameter(Mandatory = $true)][string]$FilePath,
+  [Parameter(Mandatory = $true)][string]$CacheDir
 )
 
 # Add-Type with inline C# recompiles from source on EVERY invocation unless
@@ -19,7 +20,9 @@ param(
 # per-print time, on top of the unavoidable ~0.2-0.4s powershell.exe cold
 # start). Compiling once to a cached DLL next to this script and loading
 # THAT on every subsequent print turns it into a near-instant Add-Type -Path.
-$cacheDll = Join-Path $PSScriptRoot "RawPrinterHelper.dll"
+# CacheDir must be user-writable: the script itself lives under Program Files,
+# where a standard (non-admin) Windows account can't create files.
+$cacheDll = Join-Path $CacheDir "RawPrinterHelper.dll"
 
 if (Test-Path $cacheDll) {
   Add-Type -Path $cacheDll

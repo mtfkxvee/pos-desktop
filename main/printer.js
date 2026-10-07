@@ -68,7 +68,9 @@ async function sendOverNetwork(buffer, host, port) {
 }
 
 async function sendToWindowsPrinter(buffer, printerName) {
-  const tmpFile = path.join(os.tmpdir(), `pos-receipt-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
+  const tmpDir = path.join(os.tmpdir(), "nursapos-print");
+  fs.mkdirSync(tmpDir, { recursive: true });
+  const tmpFile = path.join(tmpDir, `pos-receipt-${Date.now()}-${Math.random().toString(36).slice(2)}.bin`);
   fs.writeFileSync(tmpFile, buffer);
   try {
     await new Promise((resolve, reject) => {
@@ -84,6 +86,8 @@ async function sendToWindowsPrinter(buffer, printerName) {
           printerName,
           "-FilePath",
           tmpFile,
+          "-CacheDir",
+          tmpDir,
         ],
         (error, stdout, stderr) => {
           if (error) return reject(new Error(stderr?.trim() || error.message));
