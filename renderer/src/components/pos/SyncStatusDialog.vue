@@ -47,6 +47,9 @@
 									{{ __('Cek koneksi: {0}', [overview.onlineCheck.reason]) }}
 									<span v-if="overview.onlineCheck.ms != null">({{ overview.onlineCheck.ms }} ms)</span>
 								</p>
+								<p v-if="overview.onlineCheck?.status === 401" class="text-xs text-amber-700 mt-1">
+									{{ __('Server terjangkau tapi kredensial kasir ini ditolak. Logout lalu login ulang saat online untuk memperbarui kunci.') }}
+								</p>
 							</div>
 						</div>
 						<button

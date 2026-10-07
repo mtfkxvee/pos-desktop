@@ -91,6 +91,19 @@ async function cookieLogin(baseUrl, usr, pwd) {
   return setCookie.map((c) => c.split(";")[0]).join("; ");
 }
 
+// Only an explicit auth rejection counts — a network error leaves the cached
+// key alone, so an offline-to-online blip can't trigger a key regeneration.
+async function isApiKeyRejected(baseUrl, apiKey, apiSecret) {
+  try {
+    const res = await fetch(`${baseUrl}/api/method/frappe.auth.get_logged_user`, {
+      headers: { Authorization: `token ${apiKey}:${apiSecret}` },
+    });
+    return res.status === 401 || res.status === 403;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Full cookie-session login + call pos_next.api.utilities.generate_device_api_key
  * (added specifically for this app — see C:\Users\User\pos\pos_next\api\utilities.py)
@@ -176,6 +189,9 @@ async function login({ baseUrl, usr, pwd, outletCode, posProfile }) {
     try {
       await cookieLogin(trimmedBaseUrl, usr, pwd); // verifies password online
       ({ apiKey, apiSecret } = cached);
+      if (await isApiKeyRejected(trimmedBaseUrl, apiKey, apiSecret)) {
+        ({ apiKey, apiSecret } = await generateApiKey(trimmedBaseUrl, usr, pwd));
+      }
       saveUserCredentials(usr, { apiKey, apiSecret, password: pwd }); // refresh offline hash
     } catch (err) {
       if (!shouldFallBackOffline(err)) throw err; // genuinely wrong password/account issue
