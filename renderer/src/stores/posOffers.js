@@ -293,7 +293,11 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 
 	const autoEligibleOffers = computed(() => {
 		return availableOffers.value.filter((offer) => {
-			if (!offer?.auto || offer?.coupon_based) {
+			// validate_applied_rule === manual "Tap to Apply" (see OffersDialog.vue
+			// and autoApplyEligibleOffers in posCart.js, which both gate on this
+			// same field) — must be excluded here too, or a manual offer silently
+			// auto-applies the moment the app goes offline.
+			if (!offer?.auto || offer?.coupon_based || offer?.validate_applied_rule) {
 				return false
 			}
 
