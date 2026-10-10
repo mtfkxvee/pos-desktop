@@ -131,6 +131,94 @@
       #msg.success { color: #146c2e; }
 
       .hidden { display: none; }
+
+      /* Account picker — Google-style "who's logging in" list, so a cashier
+         who's used this device before only has to tap their name + type
+         their password, not retype their username/email every shift. */
+      #account-list {
+        display: flex;
+        flex-direction: column;
+        gap: 0.4rem;
+        margin-top: 0.75rem;
+      }
+      .account-row {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        padding: 0.55rem 0.6rem;
+        border: 1.5px solid #ddd4e8;
+        border-radius: 10px;
+        background: #fff;
+        cursor: pointer;
+        transition: border-color 0.15s ease, background 0.15s ease;
+      }
+      .account-row:hover { border-color: #8b4fc7; background: #faf6ff; }
+      .account-avatar {
+        width: 2.1rem;
+        height: 2.1rem;
+        min-width: 2.1rem;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #8b4fc7, #5f2f96);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: 700;
+        font-size: 0.95rem;
+      }
+      .account-info { flex: 1; min-width: 0; }
+      .account-username {
+        font-size: 0.86rem;
+        font-weight: 600;
+        color: #333;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .account-last-login { font-size: 0.72rem; color: #888; }
+      .account-remove {
+        border: none;
+        background: transparent;
+        color: #aaa;
+        cursor: pointer;
+        font-size: 1.1rem;
+        line-height: 1;
+        padding: 0.2rem 0.4rem;
+        border-radius: 6px;
+      }
+      .account-remove:hover { color: #b00020; background: rgba(176, 0, 32, 0.08); }
+
+      .link-btn {
+        margin-top: 0.75rem;
+        width: 100%;
+        background: transparent;
+        color: #5f2f96;
+        border: 1.5px dashed #ddd4e8;
+        font-weight: 600;
+        font-size: 0.85rem;
+      }
+      .link-btn:hover { opacity: 1; background: #faf6ff; }
+
+      #back-to-picker {
+        margin-top: 0.6rem;
+        background: transparent;
+        color: #6b6b6b;
+        font-size: 0.8rem;
+        font-weight: 500;
+        padding: 0.35rem;
+        cursor: pointer;
+        border: none;
+        text-align: center;
+        width: 100%;
+      }
+      #back-to-picker:hover { color: #5f2f96; }
+
+      #selected-account-info {
+        display: flex;
+        align-items: center;
+        gap: 0.65rem;
+        margin-top: 0.5rem;
+      }
     </style>
   </head>
   <body>
@@ -138,7 +226,42 @@
       <h2 id="title">Login Kasir</h2>
       <p id="subtitle"></p>
 
+      <!-- Account picker: shown when this device has one or more cashiers
+           who've logged in before. -->
+      <div id="picker-view" class="hidden">
+        <div id="account-list"></div>
+        <button type="button" id="add-account-btn" class="link-btn">+ Gunakan akun lain</button>
+      </div>
+
+      <!-- Password-only step after picking an account from the list above. -->
+      <div id="password-view" class="hidden">
+        <div id="selected-account-info">
+          <div class="account-avatar" id="selected-avatar"></div>
+          <div class="account-username" id="selected-username"></div>
+        </div>
+        <form id="password-form">
+          <label>Password
+            <div class="password-field">
+              <input type="password" name="pwd" id="picker-pwd-input" required />
+              <button type="button" class="password-toggle" id="picker-pwd-toggle" aria-label="Tampilkan password" title="Tampilkan password">
+                <svg class="picker-pwd-icon-show" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                  <circle cx="12" cy="12" r="3" />
+                </svg>
+                <svg class="picker-pwd-icon-hide hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M17.94 17.94A10.94 10.94 0 0112 20c-7 0-11-8-11-8a21.3 21.3 0 015.17-6.17M9.9 4.24A10.94 10.94 0 0112 4c7 0 11 8 11 8a21.3 21.3 0 01-3.22 4.44M14.12 14.12a3 3 0 11-4.24-4.24" />
+                  <line x1="1" y1="1" x2="23" y2="23" />
+                </svg>
+              </button>
+            </div>
+          </label>
+          <button type="submit">Login</button>
+        </form>
+        <button type="button" id="back-to-picker">Bukan Anda? Pilih akun lain</button>
+      </div>
+
       <form id="login-form">
+        <button type="button" id="back-to-picker-from-form" class="link-btn hidden">← Kembali ke daftar akun</button>
         <div id="setup-fields" class="hidden">
           <label>Server URL (mis. https://erp.contoh.com)
             <input type="text" name="baseUrl" />
@@ -152,7 +275,7 @@
         </div>
 
         <label>Username / Email
-          <input type="text" name="usr" required autofocus />
+          <input type="text" name="usr" required />
         </label>
         <label>Password
           <div class="password-field">
@@ -175,61 +298,145 @@
     </div>
 
     <script>
+      const BASE = "http://127.0.0.1:8871";
       const form = document.getElementById("login-form");
       const msg = document.getElementById("msg");
       const setupFields = document.getElementById("setup-fields");
       const title = document.getElementById("title");
       const subtitle = document.getElementById("subtitle");
+      const backToPickerFromForm = document.getElementById("back-to-picker-from-form");
 
-      const pwdInput = document.getElementById("pwd-input");
-      const pwdToggle = document.getElementById("pwd-toggle");
-      const pwdIconShow = document.getElementById("pwd-icon-show");
-      const pwdIconHide = document.getElementById("pwd-icon-hide");
+      const pickerView = document.getElementById("picker-view");
+      const passwordView = document.getElementById("password-view");
+      const accountList = document.getElementById("account-list");
+      const addAccountBtn = document.getElementById("add-account-btn");
+      const backToPicker = document.getElementById("back-to-picker");
+      const selectedAvatar = document.getElementById("selected-avatar");
+      const selectedUsernameEl = document.getElementById("selected-username");
+      const passwordForm = document.getElementById("password-form");
+      const pickerPwdInput = document.getElementById("picker-pwd-input");
 
-      pwdToggle.addEventListener("click", () => {
-        const showing = pwdInput.type === "text";
-        pwdInput.type = showing ? "password" : "text";
-        pwdIconShow.classList.toggle("hidden", !showing);
-        pwdIconHide.classList.toggle("hidden", showing);
-        const label = showing ? "Tampilkan password" : "Sembunyikan password";
-        pwdToggle.setAttribute("aria-label", label);
-        pwdToggle.title = label;
-      });
+      function setupPasswordToggle(toggleBtn, input, showIconSel, hideIconSel) {
+        const showIcon = toggleBtn.querySelector(showIconSel);
+        const hideIcon = toggleBtn.querySelector(hideIconSel);
+        toggleBtn.addEventListener("click", () => {
+          const showing = input.type === "text";
+          input.type = showing ? "password" : "text";
+          showIcon.classList.toggle("hidden", !showing);
+          hideIcon.classList.toggle("hidden", showing);
+          const label = showing ? "Tampilkan password" : "Sembunyikan password";
+          toggleBtn.setAttribute("aria-label", label);
+          toggleBtn.title = label;
+        });
+      }
+      setupPasswordToggle(document.getElementById("pwd-toggle"), document.getElementById("pwd-input"), "#pwd-icon-show", "#pwd-icon-hide");
+      setupPasswordToggle(document.getElementById("picker-pwd-toggle"), pickerPwdInput, ".picker-pwd-icon-show", ".picker-pwd-icon-hide");
 
       let deviceConfigured = false;
+      let accounts = [];
+      let selectedUsername = null;
 
-      async function init() {
-        try {
-          const res = await fetch("http://127.0.0.1:8871/auth/status");
-          const status = await res.json();
-          deviceConfigured = !!status.configured;
+      function relativeTime(iso) {
+        if (!iso) return "";
+        const diffMs = Date.now() - new Date(iso).getTime();
+        const minutes = Math.floor(diffMs / 60000);
+        if (minutes < 1) return "Baru saja";
+        if (minutes < 60) return minutes + " menit lalu";
+        const hours = Math.floor(minutes / 60);
+        if (hours < 24) return hours + " jam lalu";
+        const days = Math.floor(hours / 24);
+        return days + " hari lalu";
+      }
 
-          if (deviceConfigured) {
-            title.textContent = "Login Kasir";
-            subtitle.textContent = "Masukkan username dan password Anda.";
-            setupFields.classList.add("hidden");
-            for (const el of setupFields.querySelectorAll("input")) el.required = false;
-          } else {
-            title.textContent = "Setup Device — Login Pertama Kali";
-            subtitle.textContent = "Butuh koneksi internet. Data ini disimpan sekali untuk device ini.";
-            setupFields.classList.remove("hidden");
-            for (const el of setupFields.querySelectorAll("input")) el.required = true;
-          }
-        } catch (err) {
-          msg.className = "error";
-          msg.textContent = "Tidak bisa menghubungi local server: " + err.message;
+      function showView(view) {
+        pickerView.classList.toggle("hidden", view !== "picker");
+        passwordView.classList.toggle("hidden", view !== "password");
+        form.classList.toggle("hidden", view !== "form");
+        backToPickerFromForm.classList.toggle("hidden", !(view === "form" && accounts.length > 0));
+      }
+
+      function renderAccountList() {
+        accountList.innerHTML = "";
+        for (const acc of accounts) {
+          const row = document.createElement("div");
+          row.className = "account-row";
+
+          const avatar = document.createElement("div");
+          avatar.className = "account-avatar";
+          avatar.textContent = (acc.username[0] || "?").toUpperCase();
+
+          const info = document.createElement("div");
+          info.className = "account-info";
+          const nameEl = document.createElement("div");
+          nameEl.className = "account-username";
+          nameEl.textContent = acc.username;
+          const lastEl = document.createElement("div");
+          lastEl.className = "account-last-login";
+          lastEl.textContent = relativeTime(acc.lastLogin);
+          info.append(nameEl, lastEl);
+
+          const removeBtn = document.createElement("button");
+          removeBtn.type = "button";
+          removeBtn.className = "account-remove";
+          removeBtn.title = "Hapus akun ini dari device";
+          removeBtn.textContent = "×";
+          removeBtn.addEventListener("click", async (e) => {
+            e.stopPropagation();
+            try {
+              await fetch(`${BASE}/auth/users/${encodeURIComponent(acc.username)}`, { method: "DELETE" });
+            } catch {}
+            accounts = accounts.filter((a) => a.username !== acc.username);
+            renderAccountList();
+            if (accounts.length === 0) {
+              title.textContent = "Login Kasir";
+              subtitle.textContent = "Masukkan username dan password Anda.";
+              showView("form");
+            }
+          });
+
+          row.append(avatar, info, removeBtn);
+          row.addEventListener("click", () => selectAccount(acc));
+          accountList.appendChild(row);
         }
       }
-      init();
 
-      form.addEventListener("submit", async (e) => {
-        e.preventDefault();
+      function selectAccount(acc) {
+        selectedUsername = acc.username;
+        selectedAvatar.textContent = (acc.username[0] || "?").toUpperCase();
+        selectedUsernameEl.textContent = acc.username;
+        pickerPwdInput.value = "";
+        msg.textContent = "";
+        title.textContent = "Login Kasir";
+        subtitle.textContent = "";
+        showView("password");
+        pickerPwdInput.focus();
+      }
+
+      addAccountBtn.addEventListener("click", () => {
+        title.textContent = "Login Kasir";
+        subtitle.textContent = "Masukkan username dan password Anda.";
+        showView("form");
+        form.querySelector('input[name="usr"]').focus();
+      });
+
+      backToPicker.addEventListener("click", () => {
+        title.textContent = "Pilih Akun";
+        subtitle.textContent = "Siapa yang login?";
+        showView("picker");
+      });
+
+      backToPickerFromForm.addEventListener("click", () => {
+        title.textContent = "Pilih Akun";
+        subtitle.textContent = "Siapa yang login?";
+        showView("picker");
+      });
+
+      async function doLogin(data, submitBtn) {
         msg.className = "";
         msg.textContent = "Memproses login...";
-
-        const data = Object.fromEntries(new FormData(form).entries());
+        if (submitBtn) submitBtn.disabled = true;
         try {
-          const res = await fetch("http://127.0.0.1:8871/auth/login", {
+          const res = await fetch(`${BASE}/auth/login`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify(data),
@@ -244,7 +451,64 @@
         } catch (err) {
           msg.className = "error";
           msg.textContent = "Error: " + err.message;
+        } finally {
+          if (submitBtn) submitBtn.disabled = false;
         }
+      }
+
+      async function init() {
+        try {
+          const res = await fetch(`${BASE}/auth/status`);
+          const status = await res.json();
+          deviceConfigured = !!status.configured;
+
+          if (deviceConfigured) {
+            setupFields.classList.add("hidden");
+            for (const el of setupFields.querySelectorAll("input")) el.required = false;
+
+            try {
+              const usersRes = await fetch(`${BASE}/auth/users`);
+              const usersJson = await usersRes.json();
+              accounts = Array.isArray(usersJson.users) ? usersJson.users : [];
+            } catch {
+              accounts = [];
+            }
+
+            if (accounts.length > 0) {
+              title.textContent = "Pilih Akun";
+              subtitle.textContent = "Siapa yang login?";
+              renderAccountList();
+              showView("picker");
+              return;
+            }
+
+            title.textContent = "Login Kasir";
+            subtitle.textContent = "Masukkan username dan password Anda.";
+            showView("form");
+          } else {
+            title.textContent = "Setup Device — Login Pertama Kali";
+            subtitle.textContent = "Butuh koneksi internet. Data ini disimpan sekali untuk device ini.";
+            setupFields.classList.remove("hidden");
+            for (const el of setupFields.querySelectorAll("input")) el.required = true;
+            showView("form");
+            form.querySelector('input[name="usr"]').focus();
+          }
+        } catch (err) {
+          msg.className = "error";
+          msg.textContent = "Tidak bisa menghubungi local server: " + err.message;
+        }
+      }
+      init();
+
+      form.addEventListener("submit", (e) => {
+        e.preventDefault();
+        const data = Object.fromEntries(new FormData(form).entries());
+        doLogin(data, form.querySelector('button[type="submit"]'));
+      });
+
+      passwordForm.addEventListener("submit", (e) => {
+        e.preventDefault();
+        doLogin({ usr: selectedUsername, pwd: pickerPwdInput.value }, passwordForm.querySelector('button[type="submit"]'));
       });
     </script>
   </body>

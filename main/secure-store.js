@@ -80,6 +80,16 @@ function listUsers() {
   return Object.keys(loadUsersMap());
 }
 
+// For the account-picker on the login screen — never exposes apiKey/apiSecret
+// or the password hash, just enough to render "which cashier logged in here
+// before, and when" so returning cashiers only have to type their password.
+function listUserSummaries() {
+  const map = loadUsersMap();
+  return Object.entries(map)
+    .map(([username, creds]) => ({ username, lastLogin: creds.lastLogin || null }))
+    .sort((a, b) => (b.lastLogin || "").localeCompare(a.lastLogin || ""));
+}
+
 // Device identity — server URL, outlet code, default POS Profile/warehouse.
 // Set once per device (first-time setup); NOT per-user. Not secret, kept as
 // plain JSON for easy inspection/support.
@@ -104,6 +114,7 @@ module.exports = {
   removeUserCredentials,
   verifyPasswordOffline,
   listUsers,
+  listUserSummaries,
   saveDeviceConfig,
   loadDeviceConfig,
   isDeviceConfigured,

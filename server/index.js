@@ -9,6 +9,7 @@ const {
   isDeviceConfigured,
   loadDeviceConfig,
 } = require("./auth/device-setup");
+const { listUserSummaries, removeUserCredentials } = require("../main/secure-store");
 const { pingServer, getLastPingResult } = require("./sync/ping");
 const { pushQueuedInvoices, getQueueStatus } = require("./sync/push");
 const { pushQueuedShifts, listOfflineShifts, useActiveShift } = require("./sync/shifts");
@@ -105,6 +106,17 @@ function startServer({ port = 8871, dbPath } = {}) {
 
   app.post("/auth/logout", (req, res) => {
     logout();
+    res.json({ ok: true });
+  });
+
+  // Account picker on the login screen — who has logged in on this device
+  // before, so a returning cashier only has to type their password.
+  app.get("/auth/users", (req, res) => {
+    res.json({ users: isDeviceConfigured() ? listUserSummaries() : [] });
+  });
+
+  app.delete("/auth/users/:username", (req, res) => {
+    removeUserCredentials(req.params.username);
     res.json({ ok: true });
   });
 
