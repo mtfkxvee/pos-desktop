@@ -3,7 +3,7 @@
 		<!-- Header -->
 		<div class="px-3 pt-3 pb-2 bg-white border-b border-gray-200">
 			<h2 class="text-sm font-semibold text-gray-800">{{ __('Customer Database') }}</h2>
-			<p class="text-xs text-gray-500">{{ __('Search online ERPNext records') }}</p>
+			<p class="text-xs text-gray-500">{{ __('Search all downloaded customers; checks the server too when online') }}</p>
 		</div>
 
 		<!-- Search Bar -->
@@ -36,7 +36,7 @@
 				<svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 					<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
 				</svg>
-				{{ __('Online search requires internet connection') }}
+				{{ __('Offline: searching customers already downloaded to this device. A customer created elsewhere after the last sync may not show up yet.') }}
 			</div>
 		</div>
 
@@ -45,7 +45,7 @@
 			<!-- Loading State -->
 			<div v-if="loading" class="flex justify-center items-center py-8">
 				<div class="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-500"></div>
-				<span class="ms-2 text-xs text-gray-500">{{ __('Searching online...') }}</span>
+				<span class="ms-2 text-xs text-gray-500">{{ __('Searching...') }}</span>
 			</div>
 
 			<!-- Empty State -->
@@ -116,7 +116,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from "vue"
+import { ref, computed, onMounted } from "vue"
 import { debounce } from "frappe-ui"
 import { useCustomerSearchStore } from "@/stores/customerSearch"
 import { isOffline as getIsOffline } from "@/utils/offline"
@@ -138,6 +138,16 @@ const isOffline = computed(() => getIsOffline())
 const showDetails = ref(false)
 const selectedCustomer = ref(null)
 
+// The full customer catalog (with loyalty_points etc.) is already downloaded
+// to this device for the main transaction customer picker — this just makes
+// sure it's loaded before the cashier starts typing here too. A no-op if
+// another screen already triggered the load.
+onMounted(() => {
+	if (!customerStore.loadAttempted) {
+		customerStore.loadAllCustomers(props.posProfile)
+	}
+})
+
 const handleSearch = debounce(async (e) => {
 	const term = e.target.value
 	if (!term || term.length < 2) {
@@ -145,19 +155,35 @@ const handleSearch = debounce(async (e) => {
 		return
 	}
 
-	if (isOffline.value) return
-
 	loading.value = true
 	try {
-		// Use the new online-only search action
-		const results = await customerStore.searchOnlineCustomers(
-			term,
-			props.posProfile,
-		)
-		customers.value = results
-	} catch (error) {
-		console.error("Search failed:", error)
-		customers.value = []
+		// Local cache first — instant, works offline, and already has every
+		// field (including loyalty_points) since it's the same download the
+		// in-cart customer picker uses.
+		const localResults = customerStore.searchLocalCustomers(term)
+		customers.value = localResults
+
+		// Online: also check the server, in case a customer was created on
+		// another device/outlet after this one's last sync. Merge in any
+		// that aren't already in the local results instead of replacing them
+		// (replacing would drop the richer cached fields for ones found both
+		// places, and would flash the list empty while the request is in flight).
+		if (!isOffline.value) {
+			try {
+				const onlineResults = await customerStore.searchOnlineCustomers(
+					term,
+					props.posProfile,
+				)
+				const knownNames = new Set(localResults.map((c) => c.name))
+				const newOnes = onlineResults.filter((c) => !knownNames.has(c.name))
+				if (newOnes.length) {
+					customers.value = [...localResults, ...newOnes]
+				}
+			} catch (error) {
+				// Local results already shown; the online top-up is best-effort.
+				console.error("Online customer search failed:", error)
+			}
+		}
 	} finally {
 		loading.value = false
 	}

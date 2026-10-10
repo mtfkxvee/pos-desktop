@@ -386,6 +386,23 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		}
 	}
 
+	// Local-cache search that doesn't touch `searchTerm`/`resultCache` — those
+	// back the main transaction customer picker's own search box, and this is
+	// called from a DIFFERENT search box (CustomerSelector's "Customers"
+	// tab), so sharing them would make the two boxes' results bleed into each
+	// other. Reuses the same quickMatch scoring as filteredCustomers above.
+	function searchLocalCustomers(term, limit = 50) {
+		const q = (term || "").trim()
+		if (!q) return []
+		const results = []
+		for (const cust of allCustomers.value) {
+			const score = quickMatch(q, cust)
+			if (score > 0) results.push({ customer: cust, score })
+		}
+		results.sort((a, b) => b.score - a.score)
+		return results.slice(0, limit).map((r) => r.customer)
+	}
+
 	async function searchOnlineCustomers(searchTerm, posProfile, limit = 20) {
 		if (isOffline()) {
 			throw new Error("Cannot search online customers in offline mode")
@@ -461,6 +478,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 		resetSelectedIndex,
 		trackCustomerSelection,
 		loadCustomerHistory,
+		searchLocalCustomers,
 		searchOnlineCustomers, // New action
 	}
 })
