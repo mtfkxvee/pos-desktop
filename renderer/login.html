@@ -177,6 +177,13 @@
       }
       .account-last-login { font-size: 0.72rem; color: #888; }
       .account-remove {
+        /* Overrides the global `button { width: 100% }` rule — without this,
+           this button claims the row's full flex-basis and squeezes
+           .account-info (flex: 1) down to 0, which is why the email/last-
+           login text disappeared entirely instead of just wrapping. */
+        width: auto;
+        flex: 0 0 auto;
+        margin-top: 0;
         border: none;
         background: transparent;
         color: #aaa;
