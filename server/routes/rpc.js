@@ -82,8 +82,13 @@ const OFFLINE_FALLBACK = {
     return includeVariants ? rows : rows.filter((i) => !i.variant_of);
   },
   "pos_next.api.items.search_by_barcode"(params) {
-    const rows = parseRows("items");
-    return rows.find((i) => i.barcode === params?.barcode) || null;
+    // Was parseRows("items") + .find() — JSON.parse-ing all ~70k rows on
+    // every single barcode scan. idx_items_barcode already existed and was
+    // just never used for this lookup.
+    const row = getDb()
+      .prepare("SELECT data FROM items WHERE barcode = ? LIMIT 1")
+      .get(params?.barcode);
+    return row ? JSON.parse(row.data) : null;
   },
   "pos_next.api.customers.get_customers"(params) {
     const term = (params?.search_term || "").toLowerCase();

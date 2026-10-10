@@ -32,6 +32,12 @@ CREATE TABLE IF NOT EXISTS items (
 );
 CREATE INDEX IF NOT EXISTS idx_items_item_group ON items(item_group);
 CREATE INDEX IF NOT EXISTS idx_items_variant_of ON items(variant_of);
+-- Lets `ORDER BY item_name` (every get_items call, search or browse) walk an
+-- already-sorted index instead of sorting the whole ~70k-row table from
+-- scratch on every single paginated call — this was the single biggest
+-- contributor to the local server stalling mid-transaction (see rpc.js's
+-- get_items, called continuously by itemSearch.js's background cache sync).
+CREATE INDEX IF NOT EXISTS idx_items_item_name ON items(item_name);
 CREATE INDEX IF NOT EXISTS idx_items_barcode ON items(barcode);
 
 -- Item price list cache (per price_list + item_code).

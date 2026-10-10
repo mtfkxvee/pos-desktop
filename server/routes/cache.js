@@ -6,16 +6,29 @@ const router = express.Router();
 router.get("/items/search", (req, res) => {
   const { q = "", group = "", limit = 50 } = req.query;
   const term = q.toLowerCase();
-  let rows = getDb()
-    .prepare("SELECT data FROM items" + (group ? " WHERE item_group = ?" : ""))
-    .all(...(group ? [group] : []))
-    .map((r) => JSON.parse(r.data));
-  if (term) {
-    rows = rows.filter(
-      (i) => i.item_code?.toLowerCase().includes(term) || i.item_name?.toLowerCase().includes(term)
-    );
+
+  // Filtering/limiting in SQL (not loading+JSON.parse-ing the whole ~70k-row
+  // table into JS on every search, like this used to) — that full-table load
+  // was blocking the local server's single-threaded synchronous DB on every
+  // keystroke pause, competing with whatever else was mid-transaction.
+  const conditions = [];
+  const args = [];
+  if (group) {
+    conditions.push("item_group = ?");
+    args.push(group);
   }
-  res.json(rows.slice(0, Number(limit) || 50));
+  if (term) {
+    conditions.push("(LOWER(item_code) LIKE ? OR LOWER(item_name) LIKE ?)");
+    args.push(`%${term}%`, `%${term}%`);
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const lim = Number(limit) || 50;
+
+  const rows = getDb()
+    .prepare(`SELECT data FROM items ${where} ORDER BY item_name LIMIT ?`)
+    .all(...args, lim)
+    .map((r) => JSON.parse(r.data));
+  res.json(rows);
 });
 
 router.get("/items/count", (req, res) => {

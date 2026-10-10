@@ -210,6 +210,13 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Sync cancellation token - incremented to cancel any in-flight sync
 	let syncGeneration = 0
 
+	// Timestamp of the cashier's last search keystroke — the background
+	// cache sync (startBackgroundCacheSync below) checks this and backs off
+	// extra while it's recent, since both compete for the same synchronous
+	// local-server DB connection and a batch firing mid-keystroke is exactly
+	// what made search/click feel laggy (see the perf review that added this).
+	let lastSearchActivity = 0
+
 	// ========================================================================
 	// SMART CACHE UPDATE HELPERS
 	// ========================================================================
@@ -1487,9 +1494,18 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		)
 		cacheSyncing.value = true
 
-		// Use larger batch size for faster sync (500 items per batch)
-		const batchSize = 500
-		const BATCH_DELAY_MS = 500 // Small delay between batches to not overwhelm server
+		// Batch size/delay for the background catalog sync. Every batch is one
+		// synchronous query against the local server's SQLite connection (see
+		// server/routes/rpc.js's get_items) — while it runs, NOTHING else on
+		// that server (search, add-to-cart stock checks, offer calls) can be
+		// served, since node:sqlite is fully synchronous/single-threaded. This
+		// used to be 500/500ms, which at a ~70k-item catalog meant a stall
+		// every half second for the whole shift. The item_name index added
+		// alongside this makes each query far cheaper, but batch size/delay
+		// are kept moderate (not reverted to the old aggressive values) so a
+		// sync that's still running doesn't compete as hard with a live sale.
+		const batchSize = 250
+		const BATCH_DELAY_MS = 800 // Small delay between batches to not overwhelm server
 		const MAX_SYNC_RETRIES = 5
 		let batchCount = 0
 		let consecutiveErrors = 0
@@ -1540,6 +1556,15 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		const syncLoop = async () => {
 			while (myGeneration === syncGeneration) {
 				try {
+					// Back off further while the cashier is actively searching —
+					// this is exactly when a batch stealing the local server's one
+					// synchronous DB connection is most noticeable.
+					const sinceActivity = Date.now() - lastSearchActivity
+					if (sinceActivity < 1500) {
+						await new Promise((resolve) => setTimeout(resolve, 1500 - sinceActivity))
+						if (myGeneration !== syncGeneration) return
+					}
+
 					let response, list
 
 					if (hasFilters && groupsToSync.length > 0) {
@@ -1727,6 +1752,8 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	}
 
 	async function searchItems(term, immediate = false) {
+		lastSearchActivity = Date.now()
+
 		// Clear previous debounce timer
 		if (searchDebounceTimer) {
 			clearTimeout(searchDebounceTimer)
