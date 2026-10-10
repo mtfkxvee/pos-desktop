@@ -79,7 +79,7 @@
               <!-- Net Sales (after returns) -->
               <div class="text-start bg-green-50 border border-green-200 rounded-lg p-3 md:p-4">
                 <div class="text-green-600 text-xs uppercase font-medium mb-1">{{ __('Net Sales') }}</div>
-                <div class="text-lg md:text-2xl font-bold text-green-900 mb-0.5 md:mb-1 truncate">{{ formatCurrency(closingData.grand_total) }}</div>
+                <div class="text-lg md:text-2xl font-bold text-green-900 mb-0.5 md:mb-1 truncate">{{ formatCurrency(netSales) }}</div>
                 <div class="text-green-600 text-xs">{{ __('After returns') }}</div>
               </div>
 
@@ -918,17 +918,37 @@ const totalTax = computed(() => {
 	)
 })
 
-const grossSales = computed(() => {
-	if (!closingData.value) return 0
-	return closingData.value.sales_total ?? closingData.value.grand_total ?? 0
-})
-
 const loyaltyRedemptionTotal = computed(() => {
 	if (!closingData.value) return 0
 	return closingData.value.loyalty_redemption_total || 0
 })
 
 const hasLoyaltyRedemption = computed(() => loyaltyRedemptionTotal.value > 0)
+
+// Server's own sales_total/grand_total only exclude a sale from "gross"
+// when it was paid 100% via loyalty points (grand_total === loyalty_amount)
+// — a sale paid *partly* by points (e.g. cash + some points) still counted
+// its full amount. That undercounted how much loyalty actually reduced real
+// revenue. This instead subtracts the FULL redeemed amount (loyaltyRedemptionTotal,
+// which already sums every redemption, partial or full) from the raw sum of
+// every non-return invoice — matching the outlet's own sales dashboard
+// ("TOTAL SALES V2" / "REVENUE" cards), which uses this same formula.
+const grossSales = computed(() => {
+	if (!closingData.value) return 0
+	const transactions = closingData.value.pos_transactions || []
+	const rawSalesTotal = transactions
+		.filter((t) => !t.is_return)
+		.reduce((sum, t) => sum + (Number.parseFloat(t.grand_total) || 0), 0)
+	return rawSalesTotal - loyaltyRedemptionTotal.value
+})
+
+// Net Sales = Gross Sales (already loyalty-adjusted above) minus returns —
+// previously showed closingData.grand_total, the server's raw total, which
+// didn't subtract loyalty redemptions at all.
+const netSales = computed(() => {
+	if (!closingData.value) return 0
+	return grossSales.value - (closingData.value.returns_total || 0)
+})
 const getTotalExpected = computed(() => {
 	if (!closingData.value || !closingData.value.payment_reconciliation) return 0
 	return closingData.value.payment_reconciliation.reduce(
