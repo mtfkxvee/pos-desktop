@@ -183,7 +183,7 @@
 				<!-- Totals Section -->
 				<div class="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
 					<!-- Payment Info -->
-					<div v-if="invoiceData.payments && invoiceData.payments.length > 0">
+					<div v-if="(invoiceData.payments && invoiceData.payments.length > 0) || invoiceData.redeem_loyalty_points">
 						<h4 class="text-sm font-semibold text-gray-700 mb-3 flex items-center">
 							<svg class="w-4 h-4 me-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 								<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h18M7 15h1m4 0h1m-7 4h12a3 3 0 003-3V8a3 3 0 00-3-3H6a3 3 0 00-3 3v8a3 3 0 003 3z"/>
@@ -201,6 +201,20 @@
 									<div v-if="payment.account" class="text-xs text-gray-500">{{ payment.account }}</div>
 								</div>
 								<div class="text-sm font-semibold text-green-700">{{ formatCurrency(payment.amount) }}</div>
+							</div>
+							<!-- Loyalty point redemption is NOT a row in invoiceData.payments[] (ERPNext
+							     tracks it via separate redeem_loyalty_points/loyalty_amount fields), but it
+							     IS included in paid_amount — without this row, paid_amount looks bigger
+							     than the sum of payments shown above, with no explanation why. -->
+							<div
+								v-if="invoiceData.redeem_loyalty_points"
+								class="flex justify-between items-center p-3 bg-purple-50 border border-purple-200 rounded-lg"
+							>
+								<div class="text-start">
+									<div class="text-sm font-medium text-gray-900">{{ __('Loyalty Point Redemption') }}</div>
+									<div class="text-xs text-gray-500">{{ __('{0} points', [invoiceData.loyalty_points]) }}</div>
+								</div>
+								<div class="text-sm font-semibold text-purple-700">{{ formatCurrency(invoiceData.loyalty_amount) }}</div>
 							</div>
 						</div>
 					</div>

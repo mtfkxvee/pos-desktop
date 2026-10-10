@@ -269,7 +269,7 @@
 					</div>
 				</div>
 
-				<div v-if="selectedInvoice.data.payments?.length > 0" class="bg-gray-50 p-3 sm:p-4 rounded-lg">
+				<div v-if="selectedInvoice.data.payments?.length > 0 || selectedInvoice.data.redeem_loyalty_points" class="bg-gray-50 p-3 sm:p-4 rounded-lg">
 					<h4 class="font-semibold text-gray-900 mb-2 text-sm sm:text-base">{{ __('Payments') }}</h4>
 					<div class="flex flex-col gap-1">
 						<div
@@ -279,6 +279,13 @@
 						>
 							<span>{{ payment.mode_of_payment }}</span>
 							<span class="font-semibold">{{ formatCurrency(payment.amount) }}</span>
+						</div>
+						<!-- Not a row in payments[] (ERPNext tracks it via redeem_loyalty_points/
+						     loyalty_amount instead), but it IS part of paid_amount — without this,
+						     paid_amount looks bigger than the payments listed above with no explanation. -->
+						<div v-if="selectedInvoice.data.redeem_loyalty_points" class="flex justify-between text-xs sm:text-sm text-purple-700">
+							<span>{{ __('Loyalty Point Redemption ({0} points)', [selectedInvoice.data.loyalty_points]) }}</span>
+							<span class="font-semibold">{{ formatCurrency(selectedInvoice.data.loyalty_amount) }}</span>
 						</div>
 					</div>
 				</div>
