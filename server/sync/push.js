@@ -163,11 +163,73 @@ function getQueueStatus() {
   return counts;
 }
 
+const DUPLICATE_CUSTOMER_PATTERNS = ["DuplicateEntryError", "UniqueValidationError", "already exists", "Duplicate entry"];
+
+// Finishes a customer_queue row as synced under `serverName` — shared by the
+// plain insert-succeeded path and the duplicate-resolved path below, since
+// both need to do the exact same local cleanup/repoint afterward.
+function adoptCustomerSyncSuccess(db, row, payload, serverName) {
+  const now = new Date().toISOString();
+  db.prepare(
+    "UPDATE customer_queue SET status='synced', customer_name=?, updated_at=? WHERE id=?"
+  ).run(serverName, now, row.id);
+
+  // Replace the stale local cache row (inserted under the temp name by
+  // POST /customers/queue, "so it's searchable immediately") with one
+  // under the REAL server name. Nothing used to do this — the temp row
+  // just sat there forever, so a later search for this customer (e.g.
+  // the cashier re-doing a sale that failed) could still find and select
+  // the dead temp id, producing the exact "Could not find Customer:
+  // OFL-CUST-..." failure a second time, and feeding offer eligibility
+  // checks (e.g. a member discount) whatever customer_group the temp
+  // row happened to have instead of the real, possibly since-corrected,
+  // ERP value.
+  db.prepare("DELETE FROM customers WHERE name = ?").run(payload.name);
+  db.prepare(
+    `INSERT INTO customers (name, customer_name, mobile_no, email_id, modified, data)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(name) DO UPDATE SET data = excluded.data, customer_name = excluded.customer_name,
+       mobile_no = excluded.mobile_no, email_id = excluded.email_id, modified = excluded.modified`
+  ).run(
+    serverName,
+    payload.customer_name,
+    payload.mobile_no || null,
+    payload.email_id || null,
+    now,
+    JSON.stringify({ ...payload, name: serverName })
+  );
+
+  // Repoint any queued invoices that reference the temp customer id.
+  const invoiceRows = db.prepare("SELECT id, payload FROM invoice_queue WHERE status='pending'").all();
+  for (const invRow of invoiceRows) {
+    const invPayload = JSON.parse(invRow.payload);
+    if (invPayload.invoice?.customer === payload.name) {
+      invPayload.invoice.customer = serverName;
+      db.prepare("UPDATE invoice_queue SET payload=? WHERE id=?").run(
+        JSON.stringify(invPayload),
+        invRow.id
+      );
+    }
+  }
+}
+
+// If a Customer with the same custom_kode_pelanggan (the dedup key the UI
+// itself checks via isKodePelangganTaken before letting a cashier submit)
+// already exists on the server, this finds it. Used when insert fails with
+// a duplicate error — see pushQueuedCustomers below.
+async function findExistingCustomerByKode(kode) {
+  if (!kode) return null;
+  const matches = await callMethod("frappe.client.get_list", {
+    doctype: "Customer",
+    filters: { custom_kode_pelanggan: kode },
+    fields: ["name"],
+    limit_page_length: 1,
+  });
+  return matches?.[0]?.name || null;
+}
+
 // Push offline-created customers to the server via the generic Frappe
-// insert RPC. Simplified vs. the old app's 3-tier fallback matching
-// (kode_pelanggan/mobile/name) — this is a secondary path (most sales use an
-// existing or walk-in customer), so on a plain duplicate error we just mark
-// it failed for manual follow-up rather than attempting to auto-resolve.
+// insert RPC.
 async function pushQueuedCustomers() {
   const db = getDb();
   const rows = db.prepare("SELECT * FROM customer_queue WHERE status = 'pending'").all();
@@ -183,51 +245,33 @@ async function pushQueuedCustomers() {
       const created = await callMethod("frappe.client.insert", { doc });
       const serverName = created?.name;
       if (!serverName) throw new Error("Respon insert customer tidak valid");
-
-      const now = new Date().toISOString();
-      db.prepare(
-        "UPDATE customer_queue SET status='synced', customer_name=?, updated_at=? WHERE id=?"
-      ).run(serverName, now, row.id);
-
-      // Replace the stale local cache row (inserted under the temp name by
-      // POST /customers/queue, "so it's searchable immediately") with one
-      // under the REAL server name. Nothing used to do this — the temp row
-      // just sat there forever, so a later search for this customer (e.g.
-      // the cashier re-doing a sale that failed) could still find and select
-      // the dead temp id, producing the exact "Could not find Customer:
-      // OFL-CUST-..." failure a second time, and feeding offer eligibility
-      // checks (e.g. a member discount) whatever customer_group the temp
-      // row happened to have instead of the real, possibly since-corrected,
-      // ERP value.
-      db.prepare("DELETE FROM customers WHERE name = ?").run(payload.name);
-      db.prepare(
-        `INSERT INTO customers (name, customer_name, mobile_no, email_id, modified, data)
-         VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT(name) DO UPDATE SET data = excluded.data, customer_name = excluded.customer_name,
-           mobile_no = excluded.mobile_no, email_id = excluded.email_id, modified = excluded.modified`
-      ).run(
-        serverName,
-        payload.customer_name,
-        payload.mobile_no || null,
-        payload.email_id || null,
-        now,
-        JSON.stringify({ ...payload, name: serverName })
-      );
-
-      // Repoint any queued invoices that reference the temp customer id.
-      const invoiceRows = db.prepare("SELECT id, payload FROM invoice_queue WHERE status='pending'").all();
-      for (const invRow of invoiceRows) {
-        const invPayload = JSON.parse(invRow.payload);
-        if (invPayload.invoice?.customer === payload.name) {
-          invPayload.invoice.customer = serverName;
-          db.prepare("UPDATE invoice_queue SET payload=? WHERE id=?").run(
-            JSON.stringify(invPayload),
-            invRow.id
-          );
-        }
-      }
+      adoptCustomerSyncSuccess(db, row, payload, serverName);
       result.success++;
     } catch (err) {
+      // A duplicate means this customer already exists on the server —
+      // almost certainly because the SAME offline customer got queued
+      // twice (e.g. created again after the first attempt appeared to
+      // fail/not show up yet). Previously this was just marked 'failed'
+      // forever, which permanently orphaned it: the local cache entry
+      // under the temp id never resolved to the real one, so any invoice
+      // referencing it kept retrying and failing with "Could not find
+      // Customer: OFL-CUST-..." indefinitely, even after the REAL customer
+      // was sitting right there on the server the whole time. Look it up
+      // by custom_kode_pelanggan and, if found, treat it exactly like a
+      // successful sync instead of leaving it stuck.
+      if (matchesAny(err.message, DUPLICATE_CUSTOMER_PATTERNS)) {
+        try {
+          const existingName = await findExistingCustomerByKode(payload.custom_kode_pelanggan);
+          if (existingName) {
+            adoptCustomerSyncSuccess(db, row, payload, existingName);
+            result.success++;
+            continue;
+          }
+        } catch {
+          // Lookup itself failed (network, etc.) — fall through to the
+          // normal failed/retry bookkeeping below.
+        }
+      }
       const now = new Date().toISOString();
       db.prepare(
         "UPDATE customer_queue SET retry_count=retry_count+1, last_error=?, updated_at=? WHERE id=?"
