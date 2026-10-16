@@ -91,6 +91,40 @@ async function cookieLogin(baseUrl, usr, pwd) {
   return setCookie.map((c) => c.split(";")[0]).join("; ");
 }
 
+// First-time device setup saved whatever string a human typed into "POS
+// Profile Default" verbatim, with no check that it was a real POS Profile on
+// the server — a typo (seen live: "xsc-x" instead of "XSC") went unnoticed
+// and quietly broke every API call that needs pos_profile (items, offers,
+// taxes...) for that device's whole lifetime, with no error pointing at the
+// actual cause. This only BLOCKS setup on a clear "doesn't exist" answer —
+// if the check itself fails (network hiccup, unrelated server error), setup
+// proceeds anyway rather than getting fragile over a secondary call.
+async function validatePosProfileExists(baseUrl, apiKey, apiSecret, posProfile) {
+  try {
+    const res = await fetch(`${baseUrl}/api/method/frappe.client.get_value`, {
+      method: "POST",
+      headers: {
+        Authorization: `token ${apiKey}:${apiSecret}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ doctype: "POS Profile", filters: { name: posProfile }, fieldname: "name" }),
+    });
+    if (!res.ok) return; // transient/unrelated failure — don't block setup over it
+    const json = await res.json();
+    // frappe.client.get_value returns {} (not null/undefined) when nothing
+    // matches the filter — a plain falsy check on json.message misses this,
+    // since {} is truthy.
+    if (!json.message || Object.keys(json.message).length === 0) {
+      throw new Error(
+        `POS Profile "${posProfile}" tidak ditemukan di server. Periksa kembali ejaannya.`
+      );
+    }
+  } catch (err) {
+    if (err instanceof TypeError) return; // no network — don't block setup over it
+    throw err; // our own thrown "not found" error
+  }
+}
+
 // Only an explicit auth rejection counts — a network error leaves the cached
 // key alone, so an offline-to-online blip can't trigger a key regeneration.
 async function isApiKeyRejected(baseUrl, apiKey, apiSecret) {
@@ -210,6 +244,7 @@ async function login({ baseUrl, usr, pwd, outletCode, posProfile }) {
   }
 
   if (!configured) {
+    await validatePosProfileExists(trimmedBaseUrl, apiKey, apiSecret, posProfile);
     saveDeviceConfig({
       baseUrl: trimmedBaseUrl,
       outletCode,
