@@ -23,4 +23,14 @@ function initDb(dbPath) {
   return db;
 }
 
-module.exports = { initDb, getDb };
+// Used by the "Reset Data" admin action (see main/index.js) — the sqlite
+// file (and its -wal/-shm sidecars under WAL mode) can't be deleted on
+// Windows while this connection still holds it open.
+function closeDb() {
+  if (db) {
+    db.close();
+    db = null;
+  }
+}
+
+module.exports = { initDb, getDb, closeDb };

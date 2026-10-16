@@ -1,7 +1,9 @@
-const { app, BrowserWindow, ipcMain, Menu } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, dialog } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const { startServer } = require("../server");
 const { autoUpdater } = require("electron-updater");
+const { getDb, closeDb } = require("../server/db/client");
 
 app.setName("pos-desktop");
 
@@ -184,10 +186,143 @@ function openLoginWindow() {
   loginWindow.loadFile(path.join(__dirname, "..", "renderer", "login.html"));
 }
 
+// ============================================================================
+// App Settings (system tray) — right-click the tray icon for admin/support
+// actions that don't belong in the cashier-facing UI: resetting this
+// device's local data, or force-terminating a frozen app. A Windows taskbar
+// icon's right-click menu (a "Jump List") can't have nested submenus or run
+// code in the already-running process — only a real Tray icon can, so that's
+// what backs this rather than the taskbar icon itself.
+// ============================================================================
+let tray = null;
+
+function countPendingSyncItems() {
+  try {
+    const db = getDb();
+    const count = (table) =>
+      db.prepare(`SELECT COUNT(*) c FROM ${table} WHERE status = 'pending'`).get().c;
+    return count("invoice_queue") + count("shift_queue") + count("customer_queue");
+  } catch {
+    // DB not initialized (e.g. right after a reset, before relaunch) — no
+    // pending items to warn about either way.
+    return 0;
+  }
+}
+
+function resetLocalData() {
+  const pending = countPendingSyncItems();
+  const warningLines = [
+    "Ini akan menghapus SEMUA data lokal device ini:",
+    "- Setup device (server, outlet, POS Profile)",
+    "- Akun kasir yang tersimpan (harus login ulang)",
+    "- Seluruh cache & antrian offline (invoice/shift/customer)",
+    "",
+    "Aplikasi akan restart dan kembali ke layar setup awal.",
+  ];
+  if (pending > 0) {
+    warningLines.splice(
+      4,
+      0,
+      "",
+      `PERINGATAN: ada ${pending} data yang BELUM tersinkron ke server. Data ini akan HILANG PERMANEN kalau direset sekarang.`,
+    );
+  }
+
+  const response = dialog.showMessageBoxSync(mainWindow || loginWindow || null, {
+    type: "warning",
+    buttons: ["Batal", pending > 0 ? "Reset Walau Ada Data Belum Sinkron" : "Reset Data"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Reset Data Lokal",
+    message: "Yakin reset data device ini?",
+    detail: warningLines.join("\n"),
+  });
+
+  if (response !== 1) return;
+
+  try {
+    closeDb();
+    const userData = app.getPath("userData");
+    const toDelete = [
+      path.join(userData, "pos-desktop.sqlite3"),
+      path.join(userData, "pos-desktop.sqlite3-wal"),
+      path.join(userData, "pos-desktop.sqlite3-shm"),
+      path.join(userData, "config.json"),
+      path.join(userData, "users.enc"),
+    ];
+    for (const f of toDelete) {
+      fs.rmSync(f, { force: true });
+    }
+  } catch (err) {
+    dialog.showErrorBox("Reset Gagal", `Gagal menghapus data lokal: ${err.message}`);
+    return;
+  }
+
+  app.relaunch();
+  app.exit(0);
+}
+
+function terminateApp() {
+  const response = dialog.showMessageBoxSync(mainWindow || loginWindow || null, {
+    type: "warning",
+    buttons: ["Batal", "Terminate"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Terminate Aplikasi",
+    message: "Matikan aplikasi secara paksa?",
+    detail:
+      "Ini langsung mematikan proses tanpa penutupan normal — beda dari 'Keluar' biasa. Pakai ini hanya kalau aplikasi macet/tidak merespons. Transaksi yang belum disubmit di cart bisa hilang.",
+  });
+  if (response !== 1) return;
+  app.exit(1);
+}
+
+function buildTrayMenu() {
+  const pending = countPendingSyncItems();
+  return Menu.buildFromTemplate([
+    { label: `NursaPOS v${app.getVersion()}`, enabled: false },
+    { type: "separator" },
+    {
+      label: "Buka Aplikasi",
+      click: () => {
+        if (mainWindow) mainWindow.show();
+        else if (loginWindow) loginWindow.show();
+      },
+    },
+    { type: "separator" },
+    {
+      label: "App Settings",
+      submenu: [
+        {
+          label:
+            pending > 0
+              ? `Reset Data Lokal... (${pending} belum sinkron)`
+              : "Reset Data Lokal...",
+          click: resetLocalData,
+        },
+        { type: "separator" },
+        { label: "Terminate Aplikasi", click: terminateApp },
+      ],
+    },
+    { type: "separator" },
+    { label: "Keluar", click: () => app.quit() },
+  ]);
+}
+
+function createAppTray() {
+  if (tray) return;
+  const icon = nativeImage.createFromPath(APP_ICON).resize({ width: 16, height: 16 });
+  tray = new Tray(icon);
+  tray.setToolTip("NursaPOS");
+  tray.on("click", () => tray.popUpContextMenu(buildTrayMenu()));
+  tray.on("right-click", () => tray.popUpContextMenu(buildTrayMenu()));
+}
+
 async function bootstrap() {
   const dbPath = path.join(app.getPath("userData"), "pos-desktop.sqlite3");
   await startServer({ port: 8871, dbPath });
 
+  createAppTray();
   initAutoUpdate();
 
   // The active session lives only in the server's in-memory state (see
