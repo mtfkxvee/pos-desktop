@@ -125,6 +125,26 @@ async function validatePosProfileExists(baseUrl, apiKey, apiSecret, posProfile) 
   }
 }
 
+// The real list of POS Profiles this account can use, straight from the
+// server (the same call ShiftOpeningDialog.vue already uses to let a
+// cashier pick a profile when opening a shift) — used to populate the
+// setup-screen dropdown so there's nothing left to mistype.
+async function getAvailablePosProfiles(baseUrl, apiKey, apiSecret) {
+  const res = await fetch(`${baseUrl}/api/method/pos_next.api.pos_profile.get_pos_profiles`, {
+    method: "POST",
+    headers: {
+      Authorization: `token ${apiKey}:${apiSecret}`,
+      "Content-Type": "application/json",
+    },
+    body: "{}",
+  });
+  if (!res.ok) {
+    throw new Error(`Gagal mengambil daftar POS Profile dari server (kode ${res.status}).`);
+  }
+  const json = await res.json();
+  return json.message || [];
+}
+
 // Only an explicit auth rejection counts — a network error leaves the cached
 // key alone, so an offline-to-online blip can't trigger a key regeneration.
 async function isApiKeyRejected(baseUrl, apiKey, apiSecret) {
@@ -202,7 +222,7 @@ async function generateApiKey(baseUrl, usr, pwd) {
  *   internet happens to be down when their shift starts. A previously-seen
  *   username with a WRONG password is rejected in both cases.
  */
-async function login({ baseUrl, usr, pwd, outletCode, posProfile }) {
+async function login({ baseUrl, usr, pwd, posProfile }) {
   if (!usr || !pwd) {
     throw new Error("Username dan password wajib diisi");
   }
@@ -211,9 +231,6 @@ async function login({ baseUrl, usr, pwd, outletCode, posProfile }) {
   const trimmedBaseUrl = (baseUrl || loadDeviceConfig()?.baseUrl || "").replace(/\/+$/, "");
   if (!trimmedBaseUrl) {
     throw new Error("Server URL wajib diisi");
-  }
-  if (!configured && (!outletCode || !posProfile)) {
-    throw new Error("Setup device pertama kali butuh kode outlet dan POS Profile");
   }
 
   const cached = getUserCredentials(usr);
@@ -244,13 +261,35 @@ async function login({ baseUrl, usr, pwd, outletCode, posProfile }) {
   }
 
   if (!configured) {
-    await validatePosProfileExists(trimmedBaseUrl, apiKey, apiSecret, posProfile);
-    saveDeviceConfig({
-      baseUrl: trimmedBaseUrl,
-      outletCode,
-      posProfile,
-      setupAt: new Date().toISOString(),
-    });
+    // First-time setup, step 2: the cashier picked a POS Profile from the
+    // dropdown (populated by the step-1 response below) — confirm it's
+    // still real (belt-and-suspenders; it came from the server a moment
+    // ago, but don't trust a client-supplied string blindly either) and
+    // finish setup. outletCode is no longer a separate typed field — this
+    // org's POS Profile names already ARE the outlet codes (XPY, XSC, ...),
+    // so it's derived straight from the chosen profile instead of giving a
+    // second free-text field a second chance to be mistyped.
+    if (posProfile) {
+      await validatePosProfileExists(trimmedBaseUrl, apiKey, apiSecret, posProfile);
+      saveDeviceConfig({
+        baseUrl: trimmedBaseUrl,
+        outletCode: posProfile,
+        posProfile,
+        setupAt: new Date().toISOString(),
+      });
+    } else {
+      // First-time setup, step 1: credentials are good, but there's no POS
+      // Profile yet — fetch the real list this account can use and hand it
+      // back instead of completing setup. The login screen shows this as a
+      // picker and calls back in here a second time with the choice.
+      const profiles = await getAvailablePosProfiles(trimmedBaseUrl, apiKey, apiSecret);
+      if (profiles.length === 0) {
+        throw new Error(
+          "Akun ini tidak terhubung ke POS Profile manapun di server. Hubungi admin untuk menambahkan akses."
+        );
+      }
+      return { username: usr, needsProfileSelection: true, profiles };
+    }
   }
 
   activeUser = { username: usr, apiKey, apiSecret };

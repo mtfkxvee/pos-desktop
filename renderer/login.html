@@ -273,12 +273,6 @@
           <label>Server URL (mis. https://erp.contoh.com)
             <input type="text" name="baseUrl" />
           </label>
-          <label>Kode Outlet (mis. JKT01)
-            <input type="text" name="outletCode" />
-          </label>
-          <label>POS Profile Default
-            <input type="text" name="posProfile" />
-          </label>
         </div>
 
         <label>Username / Email
@@ -301,6 +295,14 @@
         </label>
         <button type="submit">Login</button>
       </form>
+
+      <!-- First-time setup, step 2: pick a real POS Profile from the server
+           instead of typing one — see server/auth/device-setup.js's
+           needsProfileSelection response. -->
+      <div id="profile-picker-view" class="hidden">
+        <div id="profile-list"></div>
+      </div>
+
       <div id="msg"></div>
     </div>
 
@@ -322,6 +324,8 @@
       const selectedUsernameEl = document.getElementById("selected-username");
       const passwordForm = document.getElementById("password-form");
       const pickerPwdInput = document.getElementById("picker-pwd-input");
+      const profilePickerView = document.getElementById("profile-picker-view");
+      const profileList = document.getElementById("profile-list");
 
       function setupPasswordToggle(toggleBtn, input, showIconSel, hideIconSel) {
         const showIcon = toggleBtn.querySelector(showIconSel);
@@ -342,6 +346,10 @@
       let deviceConfigured = false;
       let accounts = [];
       let selectedUsername = null;
+      // Credentials from setup step 1, held in memory just long enough to
+      // complete step 2 (picking a POS Profile) — never sent anywhere but
+      // back to this same device's own local server.
+      let pendingSetup = null;
 
       function relativeTime(iso) {
         if (!iso) return "";
@@ -359,7 +367,40 @@
         pickerView.classList.toggle("hidden", view !== "picker");
         passwordView.classList.toggle("hidden", view !== "password");
         form.classList.toggle("hidden", view !== "form");
+        profilePickerView.classList.toggle("hidden", view !== "profile-picker");
         backToPickerFromForm.classList.toggle("hidden", !(view === "form" && accounts.length > 0));
+      }
+
+      function renderProfileList(profiles) {
+        profileList.innerHTML = "";
+        for (const profile of profiles) {
+          const row = document.createElement("div");
+          row.className = "account-row";
+
+          const avatar = document.createElement("div");
+          avatar.className = "account-avatar";
+          avatar.textContent = (profile.name[0] || "?").toUpperCase();
+
+          const info = document.createElement("div");
+          info.className = "account-info";
+          const nameEl = document.createElement("div");
+          nameEl.className = "account-username";
+          nameEl.textContent = profile.name;
+          const subEl = document.createElement("div");
+          subEl.className = "account-last-login";
+          subEl.textContent = [profile.warehouse, profile.company].filter(Boolean).join(" · ");
+          info.append(nameEl, subEl);
+
+          row.append(avatar, info);
+          row.addEventListener("click", () => {
+            if (!pendingSetup) return;
+            doLogin(
+              { baseUrl: pendingSetup.baseUrl, usr: pendingSetup.usr, pwd: pendingSetup.pwd, posProfile: profile.name },
+              null,
+            );
+          });
+          profileList.appendChild(row);
+        }
       }
 
       function renderAccountList() {
@@ -452,6 +493,18 @@
           if (!res.ok || !json.ok) {
             throw new Error(json.error || "Login gagal");
           }
+
+          if (json.needsProfileSelection) {
+            pendingSetup = { baseUrl: data.baseUrl, usr: data.usr, pwd: data.pwd };
+            msg.className = "";
+            msg.textContent = "";
+            title.textContent = "Pilih POS Profile";
+            subtitle.textContent = "Outlet mana yang dipakai device ini?";
+            renderProfileList(json.profiles);
+            showView("profile-picker");
+            return;
+          }
+
           msg.className = "success";
           msg.textContent = "Login berhasil sebagai " + json.username + ". Membuka aplikasi kasir...";
           window.posDesktop.notifyLoginComplete();
