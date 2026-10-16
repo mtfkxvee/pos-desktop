@@ -31,6 +31,29 @@ router.get("/items/search", (req, res) => {
   res.json(rows);
 });
 
+// Offline fallback for the "Create Customer" dialog's Customer Group
+// dropdown — that dropdown's options normally come from a live-only
+// frappe.client.get_list call, so offline it rendered with ZERO options and
+// customer_group silently defaulted to "Individual". That wrong value then
+// synced straight through to the real ERP record with nothing to catch it
+// (customer_group-gated offers, e.g. a member discount, require matching
+// against the real value, so a customer created offline this way could
+// never qualify again). Derived from customer_group values already present
+// on customers cached locally — no separate table needed.
+router.get("/customer-groups", (req, res) => {
+  const rows = getDb().prepare("SELECT data FROM customers").all();
+  const groups = new Set();
+  for (const r of rows) {
+    try {
+      const group = JSON.parse(r.data)?.customer_group;
+      if (group) groups.add(group);
+    } catch {
+      // skip malformed row
+    }
+  }
+  res.json([...groups].sort());
+});
+
 router.get("/items/count", (req, res) => {
   const { group = "" } = req.query;
   const row = group

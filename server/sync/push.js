@@ -189,6 +189,31 @@ async function pushQueuedCustomers() {
         "UPDATE customer_queue SET status='synced', customer_name=?, updated_at=? WHERE id=?"
       ).run(serverName, now, row.id);
 
+      // Replace the stale local cache row (inserted under the temp name by
+      // POST /customers/queue, "so it's searchable immediately") with one
+      // under the REAL server name. Nothing used to do this — the temp row
+      // just sat there forever, so a later search for this customer (e.g.
+      // the cashier re-doing a sale that failed) could still find and select
+      // the dead temp id, producing the exact "Could not find Customer:
+      // OFL-CUST-..." failure a second time, and feeding offer eligibility
+      // checks (e.g. a member discount) whatever customer_group the temp
+      // row happened to have instead of the real, possibly since-corrected,
+      // ERP value.
+      db.prepare("DELETE FROM customers WHERE name = ?").run(payload.name);
+      db.prepare(
+        `INSERT INTO customers (name, customer_name, mobile_no, email_id, modified, data)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(name) DO UPDATE SET data = excluded.data, customer_name = excluded.customer_name,
+           mobile_no = excluded.mobile_no, email_id = excluded.email_id, modified = excluded.modified`
+      ).run(
+        serverName,
+        payload.customer_name,
+        payload.mobile_no || null,
+        payload.email_id || null,
+        now,
+        JSON.stringify({ ...payload, name: serverName })
+      );
+
       // Repoint any queued invoices that reference the temp customer id.
       const invoiceRows = db.prepare("SELECT id, payload FROM invoice_queue WHERE status='pending'").all();
       for (const invRow of invoiceRows) {

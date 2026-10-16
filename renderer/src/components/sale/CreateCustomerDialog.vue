@@ -208,6 +208,7 @@ import { friendlyError } from "@/utils/errorHandler"
 import { logger } from "@/utils/logger"
 import { isKodePelangganTaken, saveOfflineCustomer } from "@/utils/offline"
 import { offlineState } from "@/utils/offline/offlineState"
+import { offlineWorker } from "@/utils/offline/workerClient"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from "vue"
 
@@ -453,8 +454,24 @@ const loadDialogData = async () => {
 	// Lazy load countries (non-blocking)
 	countriesStore.loadCountries()
 
-	// Load form options
-	customerGroupsResource.reload()
+	// Load form options. customerGroupsResource is a live-only frappe.client
+	// call — offline it just fails silently (onError logs and moves on),
+	// which used to leave this dropdown with ZERO options and
+	// customer_group silently defaulting to "Individual". That wrong value
+	// then synced straight to the real ERP record with nothing to catch it,
+	// permanently breaking customer_group-gated offers (e.g. a member
+	// discount) for that customer. Falls back to whatever customer_group
+	// values are already present on customers cached locally.
+	if (offlineState.isOffline) {
+		try {
+			const groups = await offlineWorker.getCachedCustomerGroups()
+			if (groups?.length) customerGroups.value = groups
+		} catch (err) {
+			log.error("Error loading cached customer groups", err)
+		}
+	} else {
+		customerGroupsResource.reload()
+	}
 	checkPermissions()
 
 	// Set country from POS Profile

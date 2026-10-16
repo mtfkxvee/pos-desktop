@@ -56,6 +56,9 @@ export const offlineWorker = {
   async searchCachedCustomers(term, limit = 50) {
     return getJSON(`/cache/customers/search?q=${encodeURIComponent(term || "")}&limit=${limit}`);
   },
+  async getCachedCustomerGroups() {
+    return getJSON("/cache/customer-groups");
+  },
   async getCachedPaymentMethods(posProfile) {
     return getJSON(`/cache/payment-methods/${encodeURIComponent(posProfile)}`);
   },

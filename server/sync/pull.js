@@ -141,6 +141,26 @@ async function pullCustomers(posProfile) {
     throw err;
   }
 
+  // Belt-and-suspenders cleanup for devices that already had a stale
+  // OFL-CUST-* row stranded in the local cache from before pushQueuedCustomers
+  // started replacing it at sync time (see server/sync/push.js) — a real
+  // full customer pull is a safe point to purge any temp row whose
+  // customer_queue entry isn't still 'pending' (still-pending ones are
+  // genuinely offline and must stay searchable; anything else is either
+  // already synced — push.js's own cleanup should have caught it, this is
+  // the fallback — or a dead/failed entry with no reason to keep shadowing
+  // the real record).
+  db.prepare(
+    `DELETE FROM customers
+     WHERE name LIKE 'OFL-CUST-%'
+       AND name NOT IN (
+         SELECT (
+           -- the temp name stored in customer_queue's payload, not a real column
+           json_extract(payload, '$.name')
+         ) FROM customer_queue WHERE status = 'pending'
+       )`
+  ).run();
+
   setSyncState("customers", {
     lastModified: maxModified(rows) || state?.last_modified || null,
     lastSyncedAt: new Date().toISOString(),
