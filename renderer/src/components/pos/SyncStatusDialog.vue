@@ -194,9 +194,13 @@ import {
 } from "@heroicons/vue/24/outline"
 import { useToast } from "@/composables/useToast"
 import { useShift } from "@/composables/useShift"
+import { useCustomerSearchStore } from "@/stores/customerSearch"
+import { usePOSShiftStore } from "@/stores/posShift"
 
 defineEmits(["close", "open-offline-invoices"])
 const { showSuccess, showError } = useToast()
+const customerSearchStore = useCustomerSearchStore()
+const posShiftStore = usePOSShiftStore()
 
 const BASE = "http://127.0.0.1:8871"
 
@@ -271,6 +275,16 @@ async function handleSyncType(type) {
 			showError(__("Tidak bisa sync — server tidak terjangkau."))
 		} else {
 			showSuccess(__("Berhasil disinkronkan."))
+			// The server's local customer cache can change shape out from under
+			// the renderer's own in-memory list (e.g. a stale offline-customer
+			// row getting cleaned up — see server/sync/pull.js) without this
+			// store ever finding out, since loadAllCustomers() normally only
+			// fetches once per session. Force it to pick up whatever's now
+			// actually in the cache instead of silently keeping the old copy
+			// until the app happens to restart.
+			if (type === "customers") {
+				customerSearchStore.loadAllCustomers(posShiftStore.profileName, true)
+			}
 		}
 		await loadOverview()
 	} catch (e) {
@@ -328,6 +342,7 @@ async function handleSyncNow() {
 			showError(__("Tidak bisa sync — server tidak terjangkau."))
 		} else {
 			showSuccess(__("Sinkronisasi selesai."))
+			customerSearchStore.loadAllCustomers(posShiftStore.profileName, true)
 		}
 		await loadOverview()
 	} catch (e) {
