@@ -199,13 +199,26 @@ function adoptCustomerSyncSuccess(db, row, payload, serverName) {
     JSON.stringify({ ...payload, name: serverName })
   );
 
-  // Repoint any queued invoices that reference the temp customer id.
-  const invoiceRows = db.prepare("SELECT id, payload FROM invoice_queue WHERE status='pending'").all();
+  // Repoint any queued invoices that reference the temp customer id —
+  // 'failed' ones too (not just 'pending'): an invoice that exhausted its
+  // retries BEFORE this customer ever resolved (exactly what happened with
+  // the duplicate-customer case above — 3 failed attempts, each blocked on
+  // a customer that could never sync) would otherwise stay permanently
+  // stuck even after the real blocker is fixed, since pushQueuedInvoices
+  // only looks at 'pending' rows. Un-fail it and reset its retry count so
+  // the very next sync cycle picks it up fresh, with the correct customer
+  // this time — no manual "Retry" click needed.
+  const invoiceRows = db
+    .prepare("SELECT id, status, payload FROM invoice_queue WHERE status IN ('pending', 'failed')")
+    .all();
   for (const invRow of invoiceRows) {
     const invPayload = JSON.parse(invRow.payload);
     if (invPayload.invoice?.customer === payload.name) {
       invPayload.invoice.customer = serverName;
-      db.prepare("UPDATE invoice_queue SET payload=? WHERE id=?").run(
+      const wasFailed = invRow.status === "failed";
+      db.prepare(
+        `UPDATE invoice_queue SET payload=?${wasFailed ? ", status='pending', retry_count=0, last_error=NULL" : ""} WHERE id=?`
+      ).run(
         JSON.stringify(invPayload),
         invRow.id
       );
