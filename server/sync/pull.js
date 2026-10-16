@@ -7,6 +7,23 @@ function getSyncState(table) {
   return db.prepare("SELECT * FROM sync_state WHERE table_name = ?").get(table);
 }
 
+// What POS Profile is this cashier ACTUALLY operating under right now —
+// not just whatever was typed into "POS Profile Default" once during this
+// device's first-time setup (config.json's posProfile), which has no
+// relationship to who's logged in or what shift they opened. A wrong/stale
+// value there (seen live: "xsc-x", not a real profile) silently broke every
+// sync call for that device's whole lifetime with no connection to the
+// actual cashier's real, validated profile selection from ShiftOpeningDialog
+// (sourced from get_pos_profiles, cached here as shift_state — see
+// server/sync/shifts.js and server/routes/rpc.js's create_opening_shift).
+// Falls back to the device config only when no shift is currently open
+// (e.g. the very first sync right after setup, before any shift exists).
+function getActivePosProfile(device) {
+  const row = getDb().prepare("SELECT value FROM settings WHERE key = ?").get("shift_state");
+  const shiftState = row ? JSON.parse(row.value) : null;
+  return shiftState?.pos_opening_shift?.pos_profile || device?.posProfile || null;
+}
+
 function setSyncState(table, { lastModified, lastSyncedAt }) {
   const db = getDb();
   db.prepare(
@@ -344,7 +361,7 @@ async function pullAll() {
   if (!device?.posProfile) {
     throw new Error("Device belum ter-setup (POS Profile tidak ditemukan)");
   }
-  const posProfile = device.posProfile;
+  const posProfile = getActivePosProfile(device);
 
   const [items, customers, taxes, paymentMethods, posProfileData, offers, pinnedItems, pinnedCategories] = await Promise.all([
     pullItems(posProfile),
@@ -380,6 +397,7 @@ async function pullAll() {
 
 module.exports = {
   pullAll,
+  getActivePosProfile,
   pullItems,
   pullCustomers,
   pullTaxes,

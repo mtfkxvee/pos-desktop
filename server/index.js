@@ -15,6 +15,7 @@ const { pushQueuedInvoices, getQueueStatus } = require("./sync/push");
 const { pushQueuedShifts, listOfflineShifts, useActiveShift } = require("./sync/shifts");
 const {
   pullAll,
+  getActivePosProfile,
   pullItems,
   pullCustomers,
   pullTaxes,
@@ -220,7 +221,7 @@ function startServer({ port = 8871, dbPath } = {}) {
       return res.status(400).json({ error: "Device belum ter-setup (POS Profile tidak ditemukan)" });
     }
     try {
-      const result = await puller(device.posProfile);
+      const result = await puller(getActivePosProfile(device));
       res.json({ online: true, result });
     } catch (err) {
       res.status(502).json({ online: true, error: err.message });
