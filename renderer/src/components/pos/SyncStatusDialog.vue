@@ -154,7 +154,7 @@
 							]) }}
 						</p>
 						<button
-							v-if="overview.invoiceQueue.pending > 0 || overview.invoiceQueue.failed > 0"
+							v-if="overview.invoiceQueue.pending > 0 || overview.invoiceQueue.failed > 0 || overview.customerQueue.pending > 0 || overview.customerQueue.failed > 0"
 							@click="$emit('open-offline-invoices')"
 							class="mt-3 w-full px-3 py-2 text-sm font-semibold rounded-lg bg-orange-600 hover:bg-orange-700 text-white transition-colors flex items-center justify-center gap-2"
 						>

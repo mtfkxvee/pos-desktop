@@ -219,6 +219,76 @@
 						</div>
 					</div>
 				</div>
+
+				<!-- Offline Customer Queue — customers that are still waiting to sync,
+				     or permanently failed (e.g. a duplicate that couldn't auto-resolve,
+				     or a genuine data problem). Shown the same way failed invoices are
+				     above, so a cashier can see WHY a customer never shows up when
+				     re-doing a sale instead of it just silently retrying forever. -->
+				<div v-if="customerQueue.length > 0" class="flex flex-col gap-2">
+					<h3 class="font-semibold text-gray-900 text-sm sm:text-base mt-2">
+						{{ __('Pelanggan Belum Tersinkron') }}
+					</h3>
+					<div
+						v-for="entry in customerQueue"
+						:key="entry.id"
+						class="border border-gray-200 rounded-lg p-3 sm:p-4 hover:bg-gray-50 transition-colors"
+					>
+						<div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+							<div class="flex-1 min-w-0">
+								<div class="flex flex-wrap items-center gap-2">
+									<h4 class="font-semibold text-gray-900 text-sm sm:text-base truncate">
+										{{ entry.data.customer_name || __('Pelanggan Baru') }}
+									</h4>
+									<span
+										v-if="isCustomerPermanentlyFailed(entry)"
+										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-red-100 text-red-700 rounded-full flex-shrink-0 font-semibold"
+									>
+										{{ __('Gagal — perlu ditinjau') }}
+									</span>
+									<span
+										v-else-if="entry.retry_count > 0"
+										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-amber-100 text-amber-700 rounded-full flex-shrink-0"
+									>
+										{{ __('{0}x dicoba', [entry.retry_count]) }}
+									</span>
+								</div>
+								<p
+									v-if="isCustomerPermanentlyFailed(entry) && entry.error"
+									class="mt-1 text-xs text-red-600 break-words"
+								>
+									{{ entry.error }}
+								</p>
+								<p class="mt-1 text-xs text-gray-500">
+									{{ entry.data.custom_kode_pelanggan }}
+									<span v-if="entry.data.mobile_no"> · {{ entry.data.mobile_no }}</span>
+								</p>
+							</div>
+							<div class="flex items-center justify-end sm:justify-start gap-1 sm:gap-2">
+								<button
+									v-if="isCustomerPermanentlyFailed(entry) && !isOffline"
+									@click="retryCustomer(entry)"
+									class="p-1.5 sm:p-2 hover:bg-blue-50 rounded-lg transition-colors touch-manipulation"
+									:title="__('Retry sync')"
+								>
+									<svg class="w-4 h-4 sm:w-5 sm:h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+									</svg>
+								</button>
+								<button
+									v-if="isCustomerPermanentlyFailed(entry) && !isOffline"
+									@click="deleteCustomer(entry)"
+									class="p-1.5 sm:p-2 hover:bg-red-50 rounded-lg transition-colors touch-manipulation"
+									:title="__('Hapus — buat ulang customer ini secara online')"
+								>
+									<svg class="w-4 h-4 sm:w-5 sm:h-5 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+									</svg>
+								</button>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 		</template>
 	</Dialog>
@@ -342,6 +412,7 @@ import {
 	importBackupFromFile,
 } from "@/utils/offline/backup"
 import { db } from "@/utils/offline/db"
+import { offlineWorker } from "@/utils/offline/workerClient"
 import { Button, Dialog } from "frappe-ui"
 import { computed, ref, watch } from "vue"
 
@@ -432,10 +503,51 @@ async function resolveOfflineCustomerNames(invList) {
 	}
 }
 
+// Customers stuck in the offline queue (pending or permanently failed —
+// same "visible + retryable" treatment as invoices above, see
+// server/routes/customers.js's GET /queue and server/sync/push.js).
+const customerQueue = ref([])
+const loadingCustomerQueue = ref(false)
+
+async function loadCustomerQueue() {
+	loadingCustomerQueue.value = true
+	try {
+		customerQueue.value = await offlineWorker.getOfflineCustomerQueue()
+	} catch (error) {
+		console.error("Error loading offline customer queue:", error)
+		customerQueue.value = []
+	} finally {
+		loadingCustomerQueue.value = false
+	}
+}
+
+function isCustomerPermanentlyFailed(entry) {
+	return entry.status === "failed"
+}
+
+async function retryCustomer(entry) {
+	try {
+		await offlineWorker.retryOfflineCustomer(entry.id)
+		await loadCustomerQueue()
+	} catch (error) {
+		console.error("Error retrying offline customer:", error)
+	}
+}
+
+async function deleteCustomer(entry) {
+	try {
+		await offlineWorker.deleteOfflineCustomer(entry.id)
+		await loadCustomerQueue()
+	} catch (error) {
+		console.error("Error deleting offline customer:", error)
+	}
+}
+
 // Load invoices when dialog opens
 watch(show, async (newVal) => {
 	if (newVal) {
 		await loadInvoices()
+		await loadCustomerQueue()
 	}
 })
 

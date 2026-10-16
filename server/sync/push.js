@@ -285,10 +285,26 @@ async function pushQueuedCustomers() {
           // normal failed/retry bookkeeping below.
         }
       }
+      // Previously this incremented retry_count and left status at
+      // 'pending' forever — a genuinely-broken customer (missing required
+      // field, bad territory, whatever) retried silently every sync cycle
+      // with nothing ever surfacing it to the cashier, unlike invoices
+      // (which flip to 'failed' after MAX_RETRY_COUNT and show up in the
+      // Offline Invoices dialog). Mirrors that behavior now so a stuck
+      // customer is at least visible and actionable instead of invisible.
       const now = new Date().toISOString();
+      const retryCount = (row.retry_count || 0) + 1;
+      const status = retryCount >= MAX_RETRY_COUNT ? "failed" : "pending";
       db.prepare(
-        "UPDATE customer_queue SET retry_count=retry_count+1, last_error=?, updated_at=? WHERE id=?"
-      ).run(err.message, now, row.id);
+        "UPDATE customer_queue SET retry_count=?, status=?, last_error=?, updated_at=? WHERE id=?"
+      ).run(retryCount, status, err.message, now, row.id);
+      if (status === "failed") {
+        callMethod("pos_next.api.utilities.log_client_error", {
+          title: "Offline Customer Sync Failed",
+          message: `Customer failed to sync after ${MAX_RETRY_COUNT} attempts: ${err.message}`,
+          context: JSON.stringify({ offline_id: row.offline_id, retry_count: retryCount, error: err.message }),
+        }).catch(() => {});
+      }
       result.failed++;
     }
   }

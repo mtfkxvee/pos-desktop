@@ -181,6 +181,19 @@ export const offlineWorker = {
     return postJSON(`/invoices/queue/${id}/retry`, {});
   },
 
+  // --- offline customer queue (customers that failed/are still waiting to
+  // sync — same idea as the offline invoice queue above) ----------------
+  async getOfflineCustomerQueue() {
+    return getJSON("/customers/queue");
+  },
+  async retryOfflineCustomer(id) {
+    return postJSON(`/customers/queue/${id}/retry`, {});
+  },
+  async deleteOfflineCustomer(id) {
+    await del(`/customers/queue/${id}`);
+    return true;
+  },
+
   // Manually trigger the same pull+push cycle the scheduler runs automatically.
   async syncOfflineInvoices() {
     return postJSON("/sync/run");
