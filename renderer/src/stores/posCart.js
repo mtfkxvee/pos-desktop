@@ -595,8 +595,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		let hasDiscounts = false
 
-		invoiceItems.value.forEach((item, index) => {
-			const serverItem = serverItems[index] || {}
+		// serverItems mirrors buildOfferEvaluationPayload(), which excludes free
+		// rows — so align by position among non-free rows only. Indexing by the
+		// full cart position shifted every row after a free item and applied the
+		// wrong row's discount to the wrong item.
+		let serverIndex = 0
+		invoiceItems.value.forEach((item) => {
+			if (item.is_free_item) return
+			const serverItem = serverItems[serverIndex++] || {}
 			const discountPct = Number.parseFloat(serverItem.discount_percentage) || 0
 			const discountAmt = Number.parseFloat(serverItem.discount_amount) || 0
 
@@ -1354,20 +1360,24 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	 * path (applyOfferOffline) so both compute eligibility identically.
 	 */
 	function resolveEligibleItemsForOffer(offer) {
+		// Free rows are never eligible: counting their qty would make
+		// recursive rules multiply the free qty on top of itself.
+		const purchasedItems = invoiceItems.value.filter((item) => !item.is_free_item)
+
 		if (offer.apply_on === "Item Code") {
 			const eligibleCodes = offer.eligible_items || []
-			return invoiceItems.value.filter((item) => eligibleCodes.includes(item.item_code))
+			return purchasedItems.filter((item) => eligibleCodes.includes(item.item_code))
 		}
 		if (offer.apply_on === "Item Group") {
 			const eligibleGroups = offer.eligible_item_groups || []
-			return invoiceItems.value.filter((item) => eligibleGroups.includes(item.item_group))
+			return purchasedItems.filter((item) => eligibleGroups.includes(item.item_group))
 		}
 		if (offer.apply_on === "Brand") {
 			const eligibleBrands = offer.eligible_brands || []
-			return invoiceItems.value.filter((item) => eligibleBrands.includes(item.brand))
+			return purchasedItems.filter((item) => eligibleBrands.includes(item.brand))
 		}
 		if (offer.apply_on === "Transaction") {
-			return invoiceItems.value
+			return purchasedItems
 		}
 		return []
 	}
