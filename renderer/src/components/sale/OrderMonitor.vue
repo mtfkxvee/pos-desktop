@@ -178,6 +178,11 @@ import { ref, onMounted, onUnmounted } from "vue"
 import { call } from "@/utils/apiWrapper"
 import { useToast } from "@/composables/useToast"
 
+const props = defineProps({
+	// POS Profile in use — the monitor only shows this outlet's orders
+	posProfile: { type: String, default: "" },
+})
+
 const { showError } = useToast()
 
 const orders = ref([])
@@ -187,7 +192,9 @@ let pollTimer = null
 async function fetchOrders() {
 	loading.value = true
 	try {
-		const result = await call("pos_next.api.order_tracking.get_order_tracking")
+		const result = await call("pos_next.api.order_tracking.get_order_tracking", {
+			pos_profile: props.posProfile || undefined,
+		})
 		orders.value = (result || []).map((o) => ({
 			...o,
 			_updating: false,

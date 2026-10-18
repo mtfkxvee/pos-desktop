@@ -332,6 +332,7 @@
 
 								<OrderMonitor
 									v-if="activeLeftTab === 'orders' && posSettingsStore.enableOrderMonitor"
+									:pos-profile="shiftStore.profileName"
 								/>
 							</template>
 						</div>
@@ -1334,7 +1335,10 @@ async function checkPendingOrders() {
 	try {
 		const now = new Date()
 		const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
-		const result = await call("pos_next.api.order_tracking.get_order_tracking", { date: localDate })
+		const result = await call("pos_next.api.order_tracking.get_order_tracking", {
+			date: localDate,
+			pos_profile: shiftStore.profileName || undefined,
+		})
 		const count = (result || []).length
 		pendingOrderCount.value = count
 		const cooldownExpired = Date.now() - reminderLastDismissed > REMINDER_COOLDOWN_MS
