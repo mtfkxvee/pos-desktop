@@ -2383,6 +2383,24 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 		} catch (printError) {
 			log.warn("Offline print failed:", printError);
 			showWarning(__("Invoice saved offline but print failed"));
+
+			// Record this in the ERP Error Log so support can see WHY printing
+			// failed at a given outlet (driver issue, printer offline, wrong
+			// port, etc.) without needing the cashier's console — same
+			// mechanism used for offline invoice/customer sync failures (see
+			// server/sync/push.js's handleSyncFailure). Best-effort: a failed
+			// log call must never surface as a second error on top of the
+			// print failure itself.
+			call("pos_next.api.utilities.log_client_error", {
+				title: "POS Print Failed After Checkout",
+				message: printError?.message || String(printError),
+				context: JSON.stringify({
+					invoice: offlineName,
+					pos_profile: shiftStore.profileName || null,
+					paper_size: getPaperSize(),
+					offline: offlineStore.isOffline,
+				}),
+			}).catch(() => {});
 		}
 	} else {
 		uiStore.showSuccess(
