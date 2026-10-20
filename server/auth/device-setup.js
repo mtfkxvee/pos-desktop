@@ -7,6 +7,10 @@ const {
   isDeviceConfigured,
 } = require("../../main/secure-store");
 
+// Every outlet talks to the same ERP, so first-time setup no longer asks the
+// cashier to type the server URL — it's filled in from here instead.
+const DEFAULT_BASE_URL = "https://erp.x-sha.id";
+
 // Distinguish "the credentials were actually checked and rejected" (401/403
 // — a real "wrong password", must never fall back to offline) from
 // EVERYTHING else that can go wrong reaching a login endpoint: no network at
@@ -228,7 +232,7 @@ async function login({ baseUrl, usr, pwd, posProfile }) {
   }
 
   const configured = isDeviceConfigured();
-  const trimmedBaseUrl = (baseUrl || loadDeviceConfig()?.baseUrl || "").replace(/\/+$/, "");
+  const trimmedBaseUrl = (baseUrl || loadDeviceConfig()?.baseUrl || DEFAULT_BASE_URL).replace(/\/+$/, "");
   if (!trimmedBaseUrl) {
     throw new Error("Server URL wajib diisi");
   }

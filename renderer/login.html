@@ -269,12 +269,6 @@
 
       <form id="login-form">
         <button type="button" id="back-to-picker-from-form" class="link-btn hidden">← Kembali ke daftar akun</button>
-        <div id="setup-fields" class="hidden">
-          <label>Server URL (mis. https://erp.contoh.com)
-            <input type="text" name="baseUrl" />
-          </label>
-        </div>
-
         <label>Username / Email
           <input type="text" name="usr" required />
         </label>
@@ -310,7 +304,6 @@
       const BASE = "http://127.0.0.1:8871";
       const form = document.getElementById("login-form");
       const msg = document.getElementById("msg");
-      const setupFields = document.getElementById("setup-fields");
       const title = document.getElementById("title");
       const subtitle = document.getElementById("subtitle");
       const backToPickerFromForm = document.getElementById("back-to-picker-from-form");
@@ -523,9 +516,6 @@
           deviceConfigured = !!status.configured;
 
           if (deviceConfigured) {
-            setupFields.classList.add("hidden");
-            for (const el of setupFields.querySelectorAll("input")) el.required = false;
-
             try {
               const usersRes = await fetch(`${BASE}/auth/users`);
               const usersJson = await usersRes.json();
@@ -548,8 +538,6 @@
           } else {
             title.textContent = "Setup Device — Login Pertama Kali";
             subtitle.textContent = "Butuh koneksi internet. Data ini disimpan sekali untuk device ini.";
-            setupFields.classList.remove("hidden");
-            for (const el of setupFields.querySelectorAll("input")) el.required = true;
             showView("form");
             form.querySelector('input[name="usr"]').focus();
           }
