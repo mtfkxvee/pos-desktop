@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, dialog } = require("electron");
+const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, dialog, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
 const { startServer } = require("../server");
@@ -104,10 +104,45 @@ function attachWindowShortcuts(webContents) {
   });
 }
 
+// ============================================================================
+// Screen fit — both windows' layouts were tuned at a fixed size (MAIN_BASE /
+// LOGIN_BASE, in CSS px). On a smaller screen (1366x768, 1280x720, 1024x768
+// laptops at outlets) a window that size either spills past the taskbar or,
+// once squeezed, crams the POS layout into its cramped small-screen
+// breakpoints. Instead, each window is shrunk to fit the display's work area
+// and its page zoomed out by the same ratio, so the page still lays out as
+// if it had the full base size — everything just renders proportionally
+// smaller. workArea is already in DIPs, so Windows' own display scaling
+// (125%/150%) is accounted for. Never zooms above 1: bigger screens keep the
+// layout at its native size, with the extra room going to the window.
+// ============================================================================
+const MAIN_BASE = { width: 1280, height: 800 };
+const LOGIN_BASE = { width: 840, height: 760 };
+// Below this the text gets too small to read at a till; past it, the window
+// is allowed to scroll rather than shrink further.
+const MIN_ZOOM = 0.6;
+
+function fitZoom(base, display = screen.getPrimaryDisplay()) {
+  const { width, height } = display.workArea;
+  const zoom = Math.min(1, width / base.width, height / base.height);
+  return Math.max(MIN_ZOOM, Math.round(zoom * 100) / 100);
+}
+
+// Re-applied after every load, not just set once: Chromium keeps zoom per
+// origin, and the login and main windows are both file:// pages, so
+// whichever one loaded last would otherwise leave its zoom on the other.
+function applyZoom(win, getZoom) {
+  win.webContents.on("did-finish-load", () => {
+    if (!win.isDestroyed()) win.webContents.setZoomFactor(getZoom());
+  });
+}
+
 function openMainWindow() {
+  const display = screen.getPrimaryDisplay();
+  const zoom = fitZoom(MAIN_BASE, display);
   mainWindow = new BrowserWindow({
-    width: 1280,
-    height: 800,
+    width: Math.min(MAIN_BASE.width, display.workArea.width),
+    height: Math.min(MAIN_BASE.height, display.workArea.height),
     icon: APP_ICON,
     // A plain BrowserWindow paints solid white the instant it's created and
     // stays that way until the page's first real frame — visible as a
@@ -121,13 +156,28 @@ function openMainWindow() {
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "preload.js"),
+      zoomFactor: zoom,
     },
   });
+  // A screen smaller than the base size gets the whole work area — a
+  // floating window there would only waste the little room there is.
+  if (zoom < 1) mainWindow.maximize();
+  const win = mainWindow;
+  const currentZoom = () => fitZoom(MAIN_BASE, screen.getDisplayMatching(win.getBounds()));
+  applyZoom(win, currentZoom);
+  // Dragged onto a different monitor, or the resolution/scaling changed
+  // while the app was open — refit to whichever display it's on now.
+  const refit = () => {
+    if (!win.isDestroyed()) win.webContents.setZoomFactor(currentZoom());
+  };
+  win.on("moved", refit);
+  screen.on("display-metrics-changed", refit);
   mainWindow.once("ready-to-show", () => {
     mainWindow?.show();
     notifyMainWindowOfUpdate();
   });
   mainWindow.on("closed", () => {
+    screen.removeListener("display-metrics-changed", refit);
     mainWindow = null;
   });
   attachWindowShortcuts(mainWindow.webContents);
@@ -146,13 +196,17 @@ function openMainWindow() {
 }
 
 function openLoginWindow() {
+  // Scaled as a whole (window size and zoom by the same ratio) rather than
+  // just clamped to the screen — keeps the aspect ratio the artwork
+  // alignment below depends on.
+  const zoom = fitZoom(LOGIN_BASE);
   loginWindow = new BrowserWindow({
     // Roughly square — the login background artwork is landscape (~16:9),
     // so a narrow/tall window (previously 480x700) crops most of it away on
     // the sides. A more square window crops top/bottom instead, which
     // preserves the horizontally-spread illustration + logo much better.
-    width: 840,
-    height: 760,
+    width: Math.round(LOGIN_BASE.width * zoom),
+    height: Math.round(LOGIN_BASE.height * zoom),
     // Fixed size, deliberately. The background artwork is one baked-in
     // image using `background-size: cover` (login.html) — how much of it
     // gets cropped, and where the logo ends up relative to the login card,
@@ -174,8 +228,10 @@ function openLoginWindow() {
     webPreferences: {
       contextIsolation: true,
       preload: path.join(__dirname, "login-preload.js"),
+      zoomFactor: zoom,
     },
   });
+  applyZoom(loginWindow, () => zoom);
   loginWindow.once("ready-to-show", () => {
     loginWindow?.show();
   });
