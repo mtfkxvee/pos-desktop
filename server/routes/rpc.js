@@ -2,6 +2,7 @@ const express = require("express");
 const { callMethod } = require("../frappe-client");
 const { pingServer } = require("../sync/ping");
 const { getDb } = require("../db/client");
+const { searchItems, searchCustomers } = require("../db/search-index");
 const { createOfflineShift, pushQueuedShifts, hasPendingShifts, remapOfflineShifts } = require("../sync/shifts");
 const { pushQueuedInvoices } = require("../sync/push");
 
@@ -21,12 +22,15 @@ const {
 
 const router = express.Router();
 
-function parseRows(table) {
-  return getDb()
-    .prepare(`SELECT data FROM ${table}`)
-    .all()
-    .map((r) => JSON.parse(r.data));
+// OFFLINE_FALLBACK handlers can return raw(jsonText) for row payloads that are
+// already JSON in SQLite — splicing the text straight into the response skips
+// a JSON.parse + JSON.stringify of up to ~90k rows on Electron's main thread.
+class RawJson {
+  constructor(text) {
+    this.text = text;
+  }
 }
+const raw = (text) => new RawJson(text);
 
 // Master-data reads: served from local SQLite ALWAYS, never waiting on a
 // live server round-trip — the cache is the source of truth for the UI, kept
@@ -45,41 +49,29 @@ const OFFLINE_FALLBACK = {
   // or variant-attribute logic — a deliberate trade for instant, always-on
   // results.
   "pos_next.api.items.get_items"(params) {
-    const term = (params?.search_term || "").trim().toLowerCase();
-    const itemGroup = params?.item_group;
-    const start = params?.start || 0;
-    const limit = params?.limit || 50;
-    // Real get_items/get_items_bulk hide variant SKUs from normal catalog
-    // browsing by default (surfaced only via the template's variant-picker
-    // dialog) — match that here too, now that pullItems() caches variants
-    // locally (for that dialog's offline fallback) alongside everything
-    // else. Without this filter, variants would leak into the main grid.
-    const includeVariants = !!Number(params?.include_variants);
-
-    const conditions = [];
-    const args = [];
-    if (!includeVariants) {
-      conditions.push("(variant_of IS NULL OR variant_of = '')");
-    }
-    if (itemGroup) {
-      conditions.push("item_group = ?");
-      args.push(itemGroup);
-    }
-    if (term) {
-      conditions.push("(LOWER(item_code) LIKE ? OR LOWER(item_name) LIKE ?)");
-      args.push(`%${term}%`, `%${term}%`);
-    }
-    const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-
-    const rows = getDb()
-      .prepare(`SELECT data FROM items ${where} ORDER BY item_name LIMIT ? OFFSET ?`)
-      .all(...args, limit, start);
-    return rows.map((r) => JSON.parse(r.data));
+    // Searched via the in-memory index (server/db/search-index.js) — this
+    // used to be a LOWER(...) LIKE '%term%' full scan of the ~70k-row table
+    // on every keystroke, on the one synchronous DB connection.
+    return raw(
+      searchItems({
+        term: params?.search_term,
+        group: params?.item_group,
+        includeVariants: !!Number(params?.include_variants),
+        start: params?.start || 0,
+        limit: params?.limit || 50,
+      })
+    );
   },
   "pos_next.api.items.get_items_bulk"(params) {
     const includeVariants = !!Number(params?.include_variants);
-    const rows = parseRows("items");
-    return includeVariants ? rows : rows.filter((i) => !i.variant_of);
+    const rows = getDb()
+      .prepare(
+        includeVariants
+          ? "SELECT data FROM items"
+          : "SELECT data FROM items WHERE variant_of IS NULL OR variant_of = ''"
+      )
+      .all();
+    return raw(`[${rows.map((r) => r.data).join(",")}]`);
   },
   "pos_next.api.items.search_by_barcode"(params) {
     // Was parseRows("items") + .find() — JSON.parse-ing all ~70k rows on
@@ -91,24 +83,12 @@ const OFFLINE_FALLBACK = {
     return row ? JSON.parse(row.data) : null;
   },
   "pos_next.api.customers.get_customers"(params) {
-    const term = (params?.search_term || "").toLowerCase();
-    let rows = parseRows("customers");
-    if (term) {
-      rows = rows.filter(
-        (c) =>
-          c.customer_name?.toLowerCase().includes(term) ||
-          c.mobile_no?.includes(term)
-      );
-    }
     // Mirrors the real pos_next.api.customers.get_customers: limit=0 means
     // "no limit" (used by customerSearch.js's loadAllCustomers to pull the
     // FULL customer list once for instant local search). `params?.limit || 50`
-    // broke this — 0 is falsy in JS, so it silently fell back to 50, meaning
-    // only the first 50 cached customers (by SQLite insertion order) were
-    // ever loaded client-side. Any customer beyond that was "downloaded"
-    // (present in the local cache table) but invisible to search.
+    // broke this — 0 is falsy in JS, so it silently fell back to 50.
     const limit = params?.limit === undefined ? 50 : Number(params.limit) || 0;
-    return limit > 0 ? rows.slice(0, limit) : rows;
+    return raw(searchCustomers({ term: params?.search_term, limit }));
   },
   "pos_next.api.pos_profile.get_taxes"(params) {
     const row = getDb()
@@ -267,7 +247,11 @@ router.post("/:method", async (req, res) => {
   // background pull sync is what keeps this data current, not this request.
   if (OFFLINE_FALLBACK[method]) {
     try {
-      return res.json({ message: OFFLINE_FALLBACK[method](params), source: "cache" });
+      const result = OFFLINE_FALLBACK[method](params);
+      if (result instanceof RawJson) {
+        return res.type("json").send(`{"message":${result.text},"source":"cache"}`);
+      }
+      return res.json({ message: result, source: "cache" });
     } catch (err) {
       return res.status(500).json({ error: err.message });
     }

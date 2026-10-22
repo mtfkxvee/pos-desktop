@@ -1479,8 +1479,8 @@ const customerMap = computed(() => {
 /**
  * Instant customer search results with in-memory filtering.
  *
- * Performs zero-latency filtering on the cached customer list.
- * Searches across customer_name, mobile_no, and customer ID.
+ * Ranked match on the cached customer list (name, mobile, member code,
+ * email, customer ID).
  * Returns max 20 results to keep dropdown performant.
  *
  * @returns {Array} Filtered customer objects matching search query
@@ -1508,20 +1508,10 @@ const customerResults = computed(() => {
 		return []
 	}
 
-	// Instant in-memory filter
-	return allCustomers.value
-		.filter((cust) => {
-			const name = (cust.customer_name || "").toLowerCase()
-			const mobile = (cust.mobile_no || "").toLowerCase()
-			const id = (cust.name || "").toLowerCase()
-
-			return (
-				name.includes(searchValue) ||
-				mobile.includes(searchValue) ||
-				id.includes(searchValue)
-			)
-		})
-		.slice(0, 20)
+	// Ranked search over the store's pre-computed lowercase index — this used
+	// to lowercase name/mobile/id of every one of ~90k customers on every
+	// keystroke, which is what made typing in this box lag.
+	return customerSearchStore.searchLocalCustomers(searchValue, 20)
 })
 
 /**

@@ -1,6 +1,7 @@
 const express = require("express");
 const path = require("path");
 const { initDb, getDb } = require("./db/client");
+const { invalidate: invalidateSearch } = require("./db/search-index");
 const {
   login,
   logout,
@@ -34,6 +35,10 @@ const printRouter = require("./routes/print");
 function startServer({ port = 8871, dbPath } = {}) {
   const resolvedDbPath = dbPath || path.join(__dirname, "..", ".data", "pos-desktop.sqlite3");
   initDb(resolvedDbPath);
+  // Build the in-memory search indexes shortly after startup (staggered,
+  // each ~0.2-0.3s) so the cashier's first search doesn't pay for it.
+  setTimeout(() => invalidateSearch("items"), 500);
+  setTimeout(() => invalidateSearch("customers"), 1500);
 
   const app = express();
   app.use(express.json());

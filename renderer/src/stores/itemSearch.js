@@ -210,13 +210,6 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 	// Sync cancellation token - incremented to cancel any in-flight sync
 	let syncGeneration = 0
 
-	// Timestamp of the cashier's last search keystroke — the background
-	// cache sync (startBackgroundCacheSync below) checks this and backs off
-	// extra while it's recent, since both compete for the same synchronous
-	// local-server DB connection and a batch firing mid-keystroke is exactly
-	// what made search/click feel laggy (see the perf review that added this).
-	let lastSearchActivity = 0
-
 	// ========================================================================
 	// SMART CACHE UPDATE HELPERS
 	// ========================================================================
@@ -1477,270 +1470,57 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		filterGroups = [],
 		initialOffset = 0,
 	) {
-		// Cancel any previous sync and start fresh
+		// The catalog already lives in the local server's SQLite, kept current
+		// by its own pull cycle (server/sync/pull.js) — offlineWorker.cacheItems()
+		// is a no-op. This used to page the ENTIRE catalog back out through
+		// get_items (~300 batches of 250, one every 800ms) only to discard it,
+		// tying up the local server's single synchronous DB connection for
+		// minutes after every load and competing with live searches/cart
+		// actions. Now it just reads cache stats, polling only while the
+		// server's first pull hasn't landed any items yet.
 		syncGeneration++
 		const myGeneration = syncGeneration
-
-		if (cacheSyncing.value) {
-			log.info(
-				`Cancelling previous sync, starting new sync (gen=${myGeneration})`,
-			)
-		}
-
-		const hasFilters = filterGroups.length > 0
-
-		log.info(
-			`Starting background sync gen=${myGeneration} ${hasFilters ? `for ${filterGroups.length} groups` : "(all items)"}`,
-		)
 		cacheSyncing.value = true
 
-		// Batch size/delay for the background catalog sync. Every batch is one
-		// synchronous query against the local server's SQLite connection (see
-		// server/routes/rpc.js's get_items) — while it runs, NOTHING else on
-		// that server (search, add-to-cart stock checks, offer calls) can be
-		// served, since node:sqlite is fully synchronous/single-threaded. This
-		// used to be 500/500ms, which at a ~70k-item catalog meant a stall
-		// every half second for the whole shift. The item_name index added
-		// alongside this makes each query far cheaper, but batch size/delay
-		// are kept moderate (not reverted to the old aggressive values) so a
-		// sync that's still running doesn't compete as hard with a live sale.
-		const batchSize = 250
-		const BATCH_DELAY_MS = 800 // Small delay between batches to not overwhelm server
-		const MAX_SYNC_RETRIES = 5
-		let batchCount = 0
-		let consecutiveErrors = 0
-
-		// Track unique items to avoid double-counting from overlapping groups
-		const uniqueItemsSeen = new Set()
-
-		// For unfiltered sync: start from where initial load left off
-		let syncOffset = initialOffset
-
-		// For filtered sync: track progress per group
-		let groupIndex = 0
-		let groupOffset = 0
-
-		// Get all groups to sync — deduplicated (parent groups may share children)
-		const groupsToSync = hasFilters
-			? [
-					...new Set(
-						filterGroups.flatMap((g) => {
-							const groupInfo = itemGroups.value?.find(
-								(ig) => ig.item_group === g.item_group,
-							)
-							if (groupInfo?.child_groups?.length) {
-								return [g.item_group, ...groupInfo.child_groups]
-							}
-							return [g.item_group]
-						}),
-					),
-				]
-			: []
-
-		// Fetch total item count for progress percentage (Phase 7)
-		let totalServerItems = 0
-		try {
+		let stats = null
+		while (myGeneration === syncGeneration) {
+			try {
+				stats = await offlineWorker.getCacheStats()
+			} catch (error) {
+				log.warn("Could not read cache stats:", error.message)
+			}
 			if (myGeneration !== syncGeneration) return
-			const countResponse = await call("pos_next.api.items.get_items_count", {
-				pos_profile: profile,
-				include_variants: 1,
-			})
-			totalServerItems = countResponse?.message ?? countResponse ?? 0
-			if (myGeneration !== syncGeneration) return
-			log.info(`Total server items: ${totalServerItems}`)
-		} catch (err) {
-			log.warn("Could not fetch item count for progress tracking:", err.message)
+			if (stats?.items > 0) break
+			await new Promise((resolve) => setTimeout(resolve, 5000))
 		}
+		if (myGeneration !== syncGeneration) return
 
-		// CONTINUOUS SYNC LOOP - much faster than interval-based!
-		const syncLoop = async () => {
-			while (myGeneration === syncGeneration) {
-				try {
-					// Back off further while the cashier is actively searching —
-					// this is exactly when a batch stealing the local server's one
-					// synchronous DB connection is most noticeable.
-					const sinceActivity = Date.now() - lastSearchActivity
-					if (sinceActivity < 1500) {
-						await new Promise((resolve) => setTimeout(resolve, 1500 - sinceActivity))
-						if (myGeneration !== syncGeneration) return
-					}
-
-					let response, list
-
-					if (hasFilters && groupsToSync.length > 0) {
-						// FILTERED SYNC: Fetch items group by group
-						if (groupIndex >= groupsToSync.length) {
-							// All groups synced - DONE!
-							break
-						}
-
-						const currentGroup = groupsToSync[groupIndex]
-						log.debug(`Syncing ${currentGroup} at offset ${groupOffset}`)
-
-						response = await call("pos_next.api.items.get_items", {
-							pos_profile: profile,
-							search_term: "",
-							item_group: currentGroup,
-							start: groupOffset,
-							limit: batchSize,
-							include_variants: 1,
-						})
-						if (myGeneration !== syncGeneration) return
-						list = response?.message || response || []
-
-						if (list.length < batchSize) {
-							// Move to next group
-							groupIndex++
-							groupOffset = 0
-							log.debug(
-								`Completed group ${currentGroup} (${groupIndex}/${groupsToSync.length})`,
-							)
-						} else {
-							groupOffset += list.length
-						}
-					} else {
-						// UNFILTERED SYNC: Fetch all items with pagination
-						// Use syncOffset to skip items already loaded in initial fetch
-						response = await call("pos_next.api.items.get_items", {
-							pos_profile: profile,
-							search_term: "",
-							item_group: null,
-							start: syncOffset,
-							limit: batchSize,
-							include_variants: 1,
-						})
-						if (myGeneration !== syncGeneration) return
-						list = response?.message || response || []
-
-						// Advance offset for next batch
-						syncOffset += list.length
-
-						// Check if we've reached the end
-						if (list.length < batchSize) {
-							// Cache this last batch and exit
-							if (list.length > 0) {
-								await offlineWorker.cacheItems(list)
-								if (myGeneration !== syncGeneration) return
-								for (const item of list) {
-									if (item.item_code) uniqueItemsSeen.add(item.item_code)
-								}
-							}
-							break
-						}
-					}
-
-					if (list.length > 0) {
-						// Cache the batch
-						await offlineWorker.cacheItems(list)
-						if (myGeneration !== syncGeneration) return
-
-						// Track unique items for accurate progress
-						for (const item of list) {
-							if (item.item_code) uniqueItemsSeen.add(item.item_code)
-						}
-						batchCount++
-						consecutiveErrors = 0 // Reset on success
-
-						// Update stats EVERY batch for smooth progress indicator
-						// Include initialOffset to account for items already loaded before sync
-						const totalCached = initialOffset + uniqueItemsSeen.size
-						const syncProgress =
-							totalServerItems > 0
-								? Math.round((totalCached / totalServerItems) * 100)
-								: null
-						cacheStats.value = {
-							...cacheStats.value,
-							items: totalCached,
-							totalServerItems,
-							syncProgress,
-							lastSync: new Date().toISOString(),
-						}
-						cacheReady.value = true
-
-						// Log progress every 10 batches (5000 items)
-						if (batchCount % 10 === 0) {
-							const progressStr =
-								syncProgress != null ? ` (${syncProgress}%)` : ""
-							log.info(
-								`Sync progress: ${totalCached} items cached${progressStr} (${batchCount} batches)`,
-							)
-						}
-
-						// Note: Variants are included in the sync via include_variants=1,
-						// so no need for separate cacheVariantsForTemplates call here
-
-						// Small delay to not overwhelm server/browser
-						await new Promise((resolve) => setTimeout(resolve, BATCH_DELAY_MS))
-					}
-				} catch (error) {
-					consecutiveErrors++
-					if (consecutiveErrors >= MAX_SYNC_RETRIES) {
-						log.error(
-							`Sync failed after ${MAX_SYNC_RETRIES} consecutive errors, stopping`,
-							error.message,
-						)
-						break
-					}
-					const backoffMs = Math.min(
-						2000 * Math.pow(2, consecutiveErrors - 1),
-						30000,
-					)
-					log.warn(
-						`Sync batch error (${consecutiveErrors}/${MAX_SYNC_RETRIES}), retrying in ${backoffMs}ms...`,
-						error.message,
-					)
-					await new Promise((resolve) => setTimeout(resolve, backoffMs))
-				}
-			}
-
-			// Only finalize if this sync generation is still active
-			if (myGeneration !== syncGeneration) {
-				log.info(
-					`Sync gen=${myGeneration} cancelled (current gen=${syncGeneration})`,
-				)
-				return
-			}
-
-			// Sync complete!
-			const finalStats = await offlineWorker.getCacheStats()
-			const finalCached = initialOffset + uniqueItemsSeen.size
-			cacheStats.value = {
-				...finalStats,
-				totalServerItems,
-				syncProgress:
-					totalServerItems > 0
-						? Math.round((finalCached / totalServerItems) * 100)
-						: null,
-			}
-			cacheReady.value = true
-			cacheSyncing.value = false
-			log.success(
-				`Background sync COMPLETE - ${finalCached} items cached in ${batchCount} batches`,
-			)
-
-			// Cache batch/serial data after items are synced (in background)
-			if (shiftStore.profileWarehouse && finalCached > 0) {
-				log.info("Starting batch/serial data sync...")
-				// This runs in background, don't await
-				offlineWorker
-					.searchCachedItems("", 10000)
-					.then(async (items) => {
-						const batchSerialItems = items.filter(
-							(i) => i.has_batch_no || i.has_serial_no,
-						)
-						if (batchSerialItems.length > 0) {
-							await cacheBatchSerialForItems(
-								batchSerialItems,
-								shiftStore.profileWarehouse,
-							)
-						}
-					})
-					.catch((err) => log.warn("Batch/serial sync failed:", err.message))
-			}
+		cacheStats.value = {
+			...stats,
+			totalServerItems: stats.items,
+			syncProgress: 100,
 		}
+		cacheReady.value = true
+		cacheSyncing.value = false
+		log.success(`Item cache ready - ${stats.items} items`)
 
-		// Start the sync loop (runs in background via microtask queue)
-		syncLoop()
+		// Cache batch/serial data (in background, don't await)
+		if (shiftStore.profileWarehouse) {
+			offlineWorker
+				.searchCachedItems("", 10000)
+				.then(async (items) => {
+					const batchSerialItems = items.filter(
+						(i) => i.has_batch_no || i.has_serial_no,
+					)
+					if (batchSerialItems.length > 0) {
+						await cacheBatchSerialForItems(
+							batchSerialItems,
+							shiftStore.profileWarehouse,
+						)
+					}
+				})
+				.catch((err) => log.warn("Batch/serial sync failed:", err.message))
+		}
 	}
 
 	function stopBackgroundCacheSync() {
@@ -1751,9 +1531,11 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		}
 	}
 
-	async function searchItems(term, immediate = false) {
-		lastSearchActivity = Date.now()
+	// Bumped per search; a response from an older search is dropped so a slow
+	// earlier keystroke can never overwrite newer results.
+	let searchSeq = 0
 
+	async function searchItems(term, immediate = false) {
 		// Clear previous debounce timer
 		if (searchDebounceTimer) {
 			clearTimeout(searchDebounceTimer)
@@ -1761,44 +1543,30 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 
 		// If search term is empty, clear search results
 		if (!term || term.trim().length === 0) {
+			searchSeq++
 			setSearchResults([])
 			searching.value = false
 			return
 		}
 
-		// Debounce search — 0ms for scanner input, 400ms for manual typing
-		const delay = immediate ? 0 : 400
+		// Debounce search — 0ms for scanner input, short for manual typing.
+		// get_items is answered from the local in-memory index in a few ms
+		// (server/db/search-index.js), so a long debounce only added lag.
+		const delay = immediate ? 0 : 150
 		return new Promise((resolve) => {
 			searchDebounceTimer = setTimeout(async () => {
+				const mySeq = ++searchSeq
 				searching.value = true
 
 				// Get search limit once for this search operation
 				const searchLimit = performanceConfig.get("searchBatchSize") || 500
 
 				try {
-					// CACHE-FIRST STRATEGY:
-					// 1. Search IndexedDB cache first (instant!)
-					// 2. If cache has results, show them immediately
-					// 3. Then search server for fresh results in background
-
-					log.debug(`Searching cache for: "${term}"`)
-					const cached = await offlineWorker.searchCachedItems(
-						term,
-						searchLimit,
-					)
-
-					if (cached && cached.length > 0) {
-						// Show cached results immediately (instant!)
-						setSearchResults(cached)
-						searching.value = false
-						log.success(`Found ${cached.length} items in cache`)
-
-						// Resolve with cached results
-						resolve(cached)
-					}
-
-					// Now search server in background for fresh results
-					log.debug(`Searching server for: "${term}"`)
+					// Single cache-first query. This used to run the same local
+					// search twice (/cache/items/search, then get_items — which is
+					// also served from the local cache, see server/routes/rpc.js),
+					// with different variant/group filtering, so the grid could
+					// visibly swap results mid-typing.
 					const response = await call("pos_next.api.items.get_items", {
 						pos_profile: posProfile.value,
 						search_term: term,
@@ -1806,46 +1574,17 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 						start: 0,
 						limit: searchLimit, // Dynamically adjusted based on device performance
 					})
-					const serverResults = response?.message || response || []
-
-					if (serverResults.length > 0) {
-						// Update with fresh server results
-						setSearchResults(serverResults)
-						log.success(`Found ${serverResults.length} items on server`)
-
-						// Cache server results for future searches
-						await offlineWorker.cacheItems(serverResults)
-
-						// If we didn't resolve with cache, resolve with server results
-						if (!cached || cached.length === 0) {
-							resolve(serverResults)
-						}
-					} else if (!cached || cached.length === 0) {
-						// No results from either cache or server
-						setSearchResults([])
-						resolve([])
-					}
+					if (mySeq !== searchSeq) return resolve(searchResults.value)
+					const results = response?.message || response || []
+					setSearchResults(results)
+					resolve(results)
 				} catch (error) {
 					log.error("Error searching items", error)
-
-					// If we haven't shown cache results yet, try cache as fallback
-					if (!searchResults.value || searchResults.value.length === 0) {
-						try {
-							const cached = await offlineWorker.searchCachedItems(
-								term,
-								searchLimit,
-							)
-							setSearchResults(cached || [])
-							resolve(cached || [])
-							log.info(`Fallback: found ${cached?.length || 0} items in cache`)
-						} catch (cacheError) {
-							log.error("Cache search also failed", cacheError)
-							setSearchResults([])
-							resolve([])
-						}
-					}
+					if (mySeq !== searchSeq) return resolve(searchResults.value)
+					setSearchResults([])
+					resolve([])
 				} finally {
-					searching.value = false
+					if (mySeq === searchSeq) searching.value = false
 				}
 			}, delay)
 		})

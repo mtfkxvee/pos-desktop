@@ -3,13 +3,17 @@ import { isOffline } from "@/utils/offline"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
 import { defineStore } from "pinia"
-import { computed, ref } from "vue"
+import { computed, ref, shallowRef } from "vue"
 
 const log = logger.create("CustomerSearch")
 
 export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	// State
-	const allCustomers = ref([])
+	// shallowRef: ~90k customers. A deep ref() wrapped every customer object
+	// in a reactive Proxy, making every scan over the list (each keystroke)
+	// several times slower for no benefit — the list is only ever replaced
+	// wholesale, never mutated in place.
+	const allCustomers = shallowRef([])
 	const searchTerm = ref("")
 	const loading = ref(false)
 	// True once an initial load attempt has SETTLED — success or failure —
@@ -25,60 +29,92 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	const recentSearches = ref([])
 	const frequentCustomers = ref([])
 
-	// Performance optimization: Pre-computed search indices
-	const searchIndex = ref(new Map())
-	const resultCache = ref(new Map())
+	// Pre-computed lowercase search fields, rebuilt only when allCustomers is
+	// replaced. Plain (non-reactive) on purpose: these used to be ref(Map)s
+	// written to from inside the filteredCustomers computed, so every
+	// keystroke also triggered reactive bookkeeping on up to ~90k entries.
+	let indexSource = null
+	let index = []
+	const resultCache = new Map()
+	// Can't collide with a typed search term (those are trimmed)
+	const EMPTY_KEY = " empty"
+
+	function getIndex() {
+		if (indexSource !== allCustomers.value) {
+			indexSource = allCustomers.value
+			resultCache.clear()
+			index = indexSource.map((customer) => {
+				const name = (customer.customer_name || "").toLowerCase()
+				const entry = {
+					customer,
+					name,
+					nameWords: name.split(" "),
+					mobile: (customer.mobile_no || "").toLowerCase(),
+					email: (customer.email_id || "").toLowerCase(),
+					id: (customer.name || "").toLowerCase(),
+					code: (customer.custom_kode_pelanggan || "").toLowerCase(),
+				}
+				// All fields joined, so the common no-match case costs a single
+				// includes() instead of the full scoring chain below.
+				entry.all = [entry.name, entry.mobile, entry.code, entry.email, entry.id].join("\u0001")
+				return entry
+			})
+		}
+		return index
+	}
 
 	// Ultra-fast search helper - optimized for speed
-	function quickMatch(search, customer) {
-		const term = search.toLowerCase()
-
-		// Get or create cached lowercase strings for this customer
-		let cached = searchIndex.value.get(customer.name)
-		if (!cached) {
-			cached = {
-				name: (customer.customer_name || "").toLowerCase(),
-				mobile: (customer.mobile_no || "").toLowerCase(),
-				email: (customer.email_id || "").toLowerCase(),
-
-				id: (customer.name || "").toLowerCase(),
-				code: (customer.custom_kode_pelanggan || "").toLowerCase(),
-				// Pre-compute word starts for super fast word matching
-				nameWords: (customer.customer_name || "").toLowerCase().split(" "),
-			}
-			searchIndex.value.set(customer.name, cached)
-		}
+	function quickMatch(term, cached) {
+		if (!cached.all.includes(term)) return 0
 
 		// Lightning-fast checks in priority order
 		// Name checks (most important)
 		if (cached.name === term) return 300 // Exact name match
+		if (cached.code === term) return 290 // Custom Code match (Very High Priority)
 		if (cached.name.startsWith(term)) return 270 // Name starts with
+		if (cached.code.startsWith(term)) return 260
+		if (cached.mobile === term) return 250
 
 		// Check each word start
 		for (const word of cached.nameWords) {
 			if (word.startsWith(term)) return 240 // Word in name starts with
 		}
 
-		if (cached.name.includes(term)) return 180 // Name contains
-
 		// Phone checks (very important for POS)
-		if (cached.mobile === term) return 250
 		if (cached.mobile.startsWith(term)) return 225
-		if (cached.mobile.includes(term)) return 150
-
-		// Email checks
 		if (cached.email.startsWith(term)) return 200
-		if (cached.email.includes(term)) return 120
-
-		// ID checks
-		if (cached.code === term) return 290 // Custom Code match (Very High Priority)
-		if (cached.code.startsWith(term)) return 260
+		if (cached.name.includes(term)) return 180 // Name contains
+		if (cached.mobile.includes(term)) return 150
 		if (cached.code.includes(term)) return 140
-
 		if (cached.id.startsWith(term)) return 135
+		if (cached.email.includes(term)) return 120
 		if (cached.id.includes(term)) return 90
 
 		return 0 // No match
+	}
+
+	// Full ranked scan over the pre-computed index (~5-10ms for ~90k).
+	// Hits go into per-score buckets capped at `limit` — no sort over the
+	// thousands of matches a short term like "id" produces; equal scores
+	// keep list order.
+	function rankCustomers(term, limit) {
+		const q = term.toLowerCase()
+		const buckets = new Map()
+		for (const entry of getIndex()) {
+			const score = quickMatch(q, entry)
+			if (!score) continue
+			let bucket = buckets.get(score)
+			if (!bucket) buckets.set(score, (bucket = []))
+			if (bucket.length < limit) bucket.push(entry.customer)
+		}
+		const results = []
+		for (const score of [...buckets.keys()].sort((a, b) => b - a)) {
+			for (const customer of buckets.get(score)) {
+				results.push(customer)
+				if (results.length >= limit) return results
+			}
+		}
+		return results
 	}
 
 	// Getters - ULTRA OPTIMIZED for zero delay
@@ -87,8 +123,9 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 		// Show recent/frequent customers when no search term (CACHED)
 		if (!term) {
-			const cacheKey = "empty"
-			let cached = resultCache.value.get(cacheKey)
+			const cacheKey = EMPTY_KEY
+			getIndex() // drops cached results if the list was replaced
+			let cached = resultCache.get(cacheKey)
 
 			if (!cached) {
 				// Build index maps once for O(1) lookup
@@ -107,62 +144,23 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				}
 
 				cached = [...recent, ...frequent, ...other].slice(0, 50)
-				resultCache.value.set(cacheKey, cached)
+				resultCache.set(cacheKey, cached)
 			}
 
 			return cached
 		}
 
-		// Check result cache first
 		const cacheKey = term.toLowerCase()
-		const cachedResult = resultCache.value.get(cacheKey)
-		if (cachedResult) {
-			return cachedResult
-		}
-
-		// Ultra-fast search with early exit
-		const results = []
-		const maxResults = 50
-		let scanned = 0
-
-		// First pass: Get exact and high-scoring matches ONLY
-		for (const cust of allCustomers.value) {
-			scanned++
-			const score = quickMatch(term, cust)
-
-			if (score >= 240) {
-				// High priority matches
-				results.push({ customer: cust, score })
-				if (results.length >= maxResults) break // Exit immediately when we have enough
+		getIndex() // drops cached results if the list was replaced
+		let final = resultCache.get(cacheKey)
+		if (!final) {
+			final = rankCustomers(term, 50)
+			resultCache.set(cacheKey, final)
+			// Limit cache size to prevent memory bloat
+			if (resultCache.size > 100) {
+				resultCache.delete(resultCache.keys().next().value)
 			}
 		}
-
-		// Second pass: Fill remaining slots with lower scores if needed
-		if (results.length < maxResults && scanned < allCustomers.value.length) {
-			for (let i = scanned; i < allCustomers.value.length; i++) {
-				const cust = allCustomers.value[i]
-				const score = quickMatch(term, cust)
-
-				if (score > 0 && score < 240) {
-					results.push({ customer: cust, score })
-					if (results.length >= maxResults) break
-				}
-			}
-		}
-
-		// Sort ONLY what we found (much faster than sorting everything)
-		results.sort((a, b) => b.score - a.score)
-		const final = results.map((r) => r.customer)
-
-		// Cache this result for instant retrieval
-		resultCache.value.set(cacheKey, final)
-
-		// Limit cache size to prevent memory bloat
-		if (resultCache.value.size > 100) {
-			const firstKey = resultCache.value.keys().next().value
-			resultCache.value.delete(firstKey)
-		}
-
 		return final
 	})
 
@@ -272,9 +270,6 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 				allCustomers.value = []
 			}
 
-			// Clear caches when new data is loaded
-			searchIndex.value.clear()
-			resultCache.value.clear()
 			loadRetryCount.value = 0
 			loadAttempted.value = true
 		} catch (error) {
@@ -311,10 +306,6 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 			// Cache in worker (IndexedDB)
 			await offlineWorker.cacheCustomers([customer])
-
-			// Clear BOTH caches to ensure new customer appears in search
-			searchIndex.value.clear()
-			resultCache.value.clear()
 
 			log.success(`New customer cached: ${customer.customer_name}`)
 		} catch (error) {
@@ -394,13 +385,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 	function searchLocalCustomers(term, limit = 50) {
 		const q = (term || "").trim()
 		if (!q) return []
-		const results = []
-		for (const cust of allCustomers.value) {
-			const score = quickMatch(q, cust)
-			if (score > 0) results.push({ customer: cust, score })
-		}
-		results.sort((a, b) => b.score - a.score)
-		return results.slice(0, limit).map((r) => r.customer)
+		return rankCustomers(q, limit)
 	}
 
 	async function searchOnlineCustomers(searchTerm, posProfile, limit = 20) {

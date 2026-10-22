@@ -1,4 +1,5 @@
 const { getDb } = require("../db/client");
+const { invalidate: invalidateSearch, refresh: refreshSearch } = require("../db/search-index");
 const { callMethod } = require("../frappe-client");
 const { loadDeviceConfig } = require("../auth/device-setup");
 
@@ -32,6 +33,25 @@ function setSyncState(table, { lastModified, lastSyncedAt }) {
        last_modified = excluded.last_modified,
        last_synced_at = excluded.last_synced_at`
   ).run(table, lastModified || null, lastSyncedAt || null);
+}
+
+// A first/full pull is tens of thousands of rows; upserting them in one
+// synchronous loop froze Electron's main process (and every search/cart
+// request behind it) for seconds. Commit in chunks and yield to the event
+// loop in between so foreground requests get served mid-sync.
+const UPSERT_CHUNK = 1000;
+async function upsertInChunks(db, rows, upsertRow) {
+  for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+    db.exec("BEGIN");
+    try {
+      for (const row of rows.slice(i, i + UPSERT_CHUNK)) upsertRow(row);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    if (i + UPSERT_CHUNK < rows.length) await new Promise((resolve) => setImmediate(resolve));
+  }
 }
 
 function maxModified(rows) {
@@ -76,24 +96,18 @@ async function pullItems(posProfile) {
       modified = excluded.modified,
       data = excluded.data
   `);
-  db.exec("BEGIN");
-  try {
-    for (const item of rows) {
-      upsert.run({
-        item_code: item.item_code,
-        item_name: item.item_name || null,
-        item_group: item.item_group || null,
-        variant_of: item.variant_of || null,
-        barcode: item.barcode || null,
-        modified: item.modified || null,
-        data: JSON.stringify(item),
-      });
-    }
-    db.exec("COMMIT");
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
+  await upsertInChunks(db, rows, (item) =>
+    upsert.run({
+      item_code: item.item_code,
+      item_name: item.item_name || null,
+      item_group: item.item_group || null,
+      variant_of: item.variant_of || null,
+      barcode: item.barcode || null,
+      modified: item.modified || null,
+      data: JSON.stringify(item),
+    })
+  );
+  if (rows.length) refreshSearch("items", rows.map((r) => r.item_code));
 
   setSyncState("items", {
     lastModified: maxModified(rows) || state?.last_modified || null,
@@ -123,23 +137,16 @@ async function pullCustomers(posProfile) {
       modified = excluded.modified,
       data = excluded.data
   `);
-  db.exec("BEGIN");
-  try {
-    for (const c of rows) {
-      upsert.run({
-        name: c.name,
-        customer_name: c.customer_name || null,
-        mobile_no: c.mobile_no || null,
-        email_id: c.email_id || null,
-        modified: c.modified || null,
-        data: JSON.stringify(c),
-      });
-    }
-    db.exec("COMMIT");
-  } catch (err) {
-    db.exec("ROLLBACK");
-    throw err;
-  }
+  await upsertInChunks(db, rows, (c) =>
+    upsert.run({
+      name: c.name,
+      customer_name: c.customer_name || null,
+      mobile_no: c.mobile_no || null,
+      email_id: c.email_id || null,
+      modified: c.modified || null,
+      data: JSON.stringify(c),
+    })
+  );
 
   // Belt-and-suspenders cleanup for devices that already had a stale
   // OFL-CUST-* row stranded in the local cache from before pushQueuedCustomers
@@ -150,7 +157,7 @@ async function pullCustomers(posProfile) {
   // already synced — push.js's own cleanup should have caught it, this is
   // the fallback — or a dead/failed entry with no reason to keep shadowing
   // the real record).
-  db.prepare(
+  const purged = db.prepare(
     `DELETE FROM customers
      WHERE name LIKE 'OFL-CUST-%'
        AND name NOT IN (
@@ -160,6 +167,8 @@ async function pullCustomers(posProfile) {
          ) FROM customer_queue WHERE status = 'pending'
        )`
   ).run();
+  if (purged.changes) invalidateSearch("customers");
+  else if (rows.length) refreshSearch("customers", rows.map((r) => r.name));
 
   setSyncState("customers", {
     lastModified: maxModified(rows) || state?.last_modified || null,

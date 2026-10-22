@@ -1,34 +1,16 @@
 const express = require("express");
 const { getDb } = require("../db/client");
+const { searchItems, searchCustomers } = require("../db/search-index");
 
 const router = express.Router();
 
 router.get("/items/search", (req, res) => {
   const { q = "", group = "", limit = 50 } = req.query;
-  const term = q.toLowerCase();
-
-  // Filtering/limiting in SQL (not loading+JSON.parse-ing the whole ~70k-row
-  // table into JS on every search, like this used to) — that full-table load
-  // was blocking the local server's single-threaded synchronous DB on every
-  // keystroke pause, competing with whatever else was mid-transaction.
-  const conditions = [];
-  const args = [];
-  if (group) {
-    conditions.push("item_group = ?");
-    args.push(group);
-  }
-  if (term) {
-    conditions.push("(LOWER(item_code) LIKE ? OR LOWER(item_name) LIKE ?)");
-    args.push(`%${term}%`, `%${term}%`);
-  }
-  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
-  const lim = Number(limit) || 50;
-
-  const rows = getDb()
-    .prepare(`SELECT data FROM items ${where} ORDER BY item_name LIMIT ?`)
-    .all(...args, lim)
-    .map((r) => JSON.parse(r.data));
-  res.json(rows);
+  // In-memory index (server/db/search-index.js), not a LIKE '%term%' full
+  // scan. Variants stay included, as this route always did.
+  res.type("json").send(
+    searchItems({ term: q, group: group || null, includeVariants: true, limit: Number(limit) || 50 })
+  );
 });
 
 // Offline fallback for the "Create Customer" dialog's Customer Group
@@ -41,17 +23,15 @@ router.get("/items/search", (req, res) => {
 // never qualify again). Derived from customer_group values already present
 // on customers cached locally — no separate table needed.
 router.get("/customer-groups", (req, res) => {
-  const rows = getDb().prepare("SELECT data FROM customers").all();
-  const groups = new Set();
-  for (const r of rows) {
-    try {
-      const group = JSON.parse(r.data)?.customer_group;
-      if (group) groups.add(group);
-    } catch {
-      // skip malformed row
-    }
-  }
-  res.json([...groups].sort());
+  // DISTINCT in SQL — was JSON.parse-ing every one of ~90k customers.
+  const groups = getDb()
+    .prepare(
+      `SELECT DISTINCT json_extract(data, '$.customer_group') AS g FROM customers
+       WHERE json_valid(data) AND g IS NOT NULL AND g != '' ORDER BY g`
+    )
+    .all()
+    .map((r) => r.g);
+  res.json(groups);
 });
 
 router.get("/items/count", (req, res) => {
@@ -64,24 +44,11 @@ router.get("/items/count", (req, res) => {
 
 router.get("/customers/search", (req, res) => {
   const { q = "", limit } = req.query;
-  const term = q.toLowerCase();
-  let rows = getDb()
-    .prepare("SELECT data FROM customers")
-    .all()
-    .map((r) => JSON.parse(r.data));
-  if (term) {
-    rows = rows.filter(
-      (c) => c.customer_name?.toLowerCase().includes(term) || c.mobile_no?.includes(term)
-    );
-  }
   // customerSearch.js's loadAllCustomers calls this with limit=0 meaning
-  // "no limit" (it wants the FULL customer list once, for instant local
-  // search) — `Number(limit) || 50` broke that: 0 is falsy in JS, so it
-  // silently capped to the first 50 cached customers (arbitrary SQLite
-  // order), making every customer beyond that unsearchable even though it
-  // was genuinely present in the local cache.
+  // "no limit" (the FULL list, for instant local search) — 0 must not fall
+  // back to 50. Sent as the raw stored JSON (no parse/stringify of ~90k rows).
   const n = limit === undefined ? 50 : Number(limit) || 0;
-  res.json(n > 0 ? rows.slice(0, n) : rows);
+  res.type("json").send(searchCustomers({ term: q, limit: n }));
 });
 
 router.get("/payment-methods/:posProfile", (req, res) => {

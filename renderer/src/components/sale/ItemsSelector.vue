@@ -1226,7 +1226,7 @@ function handleKeyDown(event) {
 
 // Handle search input.
 // - enterToSearchEnabled ON : only update the term; server request fires on Enter
-// - enterToSearchEnabled OFF: fall through to 400ms debounced search (live mode)
+// - enterToSearchEnabled OFF: fall through to the short debounced search (live mode)
 // - autoAddEnabled ON       : schedule an exact-match + auto-add after 500ms pause
 function handleSearchInput(event) {
 	const value = event.target.value
@@ -1243,7 +1243,7 @@ function handleSearchInput(event) {
 			handleBarcodeSearch(true)
 		}, 500)
 	} else if (!enterToSearchEnabled.value) {
-		// Live-search mode: debounce 400ms on every keystroke
+		// Live-search mode: debounced in itemStore.searchItems
 		itemStore.setSearchTerm(value)
 	}
 	// else: Enter-to-search mode (ON) — no server call while typing, regardless of Auto-Add

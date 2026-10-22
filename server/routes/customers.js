@@ -1,6 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { getDb } = require("../db/client");
+const { refresh: refreshSearch } = require("../db/search-index");
 
 const router = express.Router();
 
@@ -51,6 +52,7 @@ router.delete("/queue/:id", (req, res) => {
   const payload = JSON.parse(row.payload);
   db.prepare("DELETE FROM customer_queue WHERE id = ?").run(req.params.id);
   db.prepare("DELETE FROM customers WHERE name = ?").run(payload.name);
+  refreshSearch("customers", [payload.name]);
   res.json({ success: true });
 });
 
@@ -75,6 +77,7 @@ router.post("/queue", (req, res) => {
      VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(name) DO UPDATE SET data = excluded.data`
   ).run(tempName, payload.customer_name, payload.mobile_no || null, payload.email_id || null, now, JSON.stringify(payload));
+  refreshSearch("customers", [tempName]);
 
   res.json({ success: true, offline_id: offlineId, name: tempName, customer_name: payload.customer_name });
 });

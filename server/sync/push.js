@@ -1,4 +1,5 @@
 const { getDb } = require("../db/client");
+const { refresh: refreshSearch } = require("../db/search-index");
 const { callMethod } = require("../frappe-client");
 const { pingServer } = require("./ping");
 const { pushQueuedShifts, resolveShiftName, isShiftPending } = require("./shifts");
@@ -198,6 +199,7 @@ function adoptCustomerSyncSuccess(db, row, payload, serverName) {
     now,
     JSON.stringify({ ...payload, name: serverName })
   );
+  refreshSearch("customers", [payload.name, serverName]);
 
   // Repoint any queued invoices that reference the temp customer id —
   // 'failed' ones too (not just 'pending'): an invoice that exhausted its
