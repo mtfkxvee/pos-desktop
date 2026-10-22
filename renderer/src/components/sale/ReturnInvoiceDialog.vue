@@ -1294,12 +1294,14 @@ watch(normalizedSearchTerm, (searchTerm) => {
 watch(returnTotal, (newTotal) => {
 	if (!returnModal.visible || !showDialog.value || isOriginalCreditSale.value)
 		return
-	if (refundPayments.value.length !== 1 || newTotal <= 0) return
+	if (refundPayments.value.length !== 1) return
 
-	refundPayments.value[0].amount = isPartiallyPaid.value
-		? roundCurrency(maxRefundableAmount.value)
-		: newTotal
+	refundPayments.value[0].amount = refundTarget(newTotal)
 })
+
+function refundTarget(total = returnTotal.value) {
+	return isPartiallyPaid.value ? roundCurrency(maxRefundableAmount.value) : total
+}
 
 // Methods
 function extractErrorMessage(
@@ -1383,11 +1385,18 @@ function initializePaymentsFromInvoice() {
 		return
 	}
 
-	const invoicePayments = originalInvoice.value?.payments
-	if (invoicePayments?.length) {
-		refundPayments.value = invoicePayments.map((payment) => ({
+	// POS invoices carry a row for every mode of payment, mostly at 0 — only
+	// keep the ones actually used, so the common single-method case ends up
+	// as one row the returnTotal watcher can keep in sync. Amounts start from
+	// the refund target, never the original payment (which may include change
+	// given, e.g. 100,000 paid for a 59,000 invoice).
+	const invoicePayments = originalInvoice.value?.payments || []
+	const usedPayments = invoicePayments.filter((p) => Math.abs(p.amount || 0) > 0)
+	const rows = usedPayments.length ? usedPayments : invoicePayments.slice(0, 1)
+	if (rows.length) {
+		refundPayments.value = rows.map((payment, index) => ({
 			mode_of_payment: payment.mode_of_payment,
-			amount: isPartiallyPaid.value ? 0 : Math.abs(payment.amount),
+			amount: index === 0 ? refundTarget() : 0,
 		}))
 	} else {
 		refundPayments.value = [
