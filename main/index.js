@@ -138,6 +138,24 @@ function applyZoom(win, getZoom) {
   });
 }
 
+// Windows are created hidden and revealed on 'ready-to-show' (see the
+// white-flash note in openMainWindow) — but that event doesn't always fire:
+// observed live, the login window sat created-but-invisible indefinitely,
+// so the app looked like it "opened with nothing on screen". Fall back to
+// showing it anyway after a few seconds.
+const SHOW_FALLBACK_MS = 3000;
+function showWhenReady(win, onShown) {
+  let shown = false;
+  const reveal = () => {
+    if (shown || win.isDestroyed()) return;
+    shown = true;
+    win.show();
+    onShown?.();
+  };
+  win.once("ready-to-show", reveal);
+  setTimeout(reveal, SHOW_FALLBACK_MS);
+}
+
 function openMainWindow() {
   const display = screen.getPrimaryDisplay();
   const zoom = fitZoom(MAIN_BASE, display);
@@ -173,10 +191,7 @@ function openMainWindow() {
   };
   win.on("moved", refit);
   screen.on("display-metrics-changed", refit);
-  mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
-    notifyMainWindowOfUpdate();
-  });
+  showWhenReady(mainWindow, notifyMainWindowOfUpdate);
   mainWindow.on("closed", () => {
     screen.removeListener("display-metrics-changed", refit);
     mainWindow = null;
@@ -233,9 +248,7 @@ function openLoginWindow() {
     },
   });
   applyZoom(loginWindow, () => zoom);
-  loginWindow.once("ready-to-show", () => {
-    loginWindow?.show();
-  });
+  showWhenReady(loginWindow);
   loginWindow.on("closed", () => {
     loginWindow = null;
   });
