@@ -237,30 +237,18 @@ const isLoadingMore = ref(false)
 // Loading state for the offline path (no createResource involved)
 const offlineLoading = ref(false)
 
-// Create resource for loading invoices
+// Create resource for loading invoices. Uses pos_next's own whitelisted
+// endpoint (same as InvoiceManagement/POSSale) rather than raw
+// frappe.client.get_list, which needs Sales Invoice read permission that
+// cashier roles often don't have — that surfaced as a PermissionError and
+// an empty "Failed to load invoices" dialog.
 const invoicesResource = createResource({
-	url: "frappe.client.get_list",
+	url: "pos_next.api.invoices.get_invoices",
 	makeParams() {
 		return {
-			doctype: "Sales Invoice",
-			filters: {
-				is_pos: 1,
-				...(props.posProfile && { pos_profile: props.posProfile }),
-			},
-			fields: [
-				"name",
-				"customer",
-				"customer_name",
-				"posting_date",
-				"posting_time",
-				"grand_total",
-				"status",
-				"docstatus",
-				"is_return",
-			],
-			order_by: "modified desc",
-			start: page.value * pageSize,
-			page_length: pageSize,
+			pos_profile: props.posProfile,
+			limit: pageSize,
+			offset: page.value * pageSize,
 		}
 	},
 	auto: false,
@@ -268,7 +256,7 @@ const invoicesResource = createResource({
 		if (data && Array.isArray(data)) {
 			const newInvoices = data.map((inv) => ({
 				...inv,
-				items_count: 0,
+				items_count: inv.items?.length || 0,
 			}))
 
 			if (isLoadingMore.value) {

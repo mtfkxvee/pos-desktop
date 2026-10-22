@@ -19,6 +19,30 @@ function getBaseUrl() {
   return device.baseUrl;
 }
 
+// Frappe's human-readable error text (frappe.throw / ValidationError — the
+// usual cause of a 417) lives in `_server_messages`, a JSON string of JSON
+// strings, not in `exception`/`message`. Without this the cashier only saw
+// "HTTP 417" with no idea what the server actually rejected.
+function serverMessages(json) {
+  if (!json?._server_messages) return null;
+  try {
+    const text = JSON.parse(json._server_messages)
+      .map((m) => {
+        try {
+          return JSON.parse(m).message;
+        } catch {
+          return m;
+        }
+      })
+      .filter(Boolean)
+      .join(" | ")
+      .replace(/<[^>]+>/g, "");
+    return text || null;
+  } catch {
+    return null;
+  }
+}
+
 async function callMethod(method, params = {}, { httpMethod = "POST" } = {}) {
   const url = `${getBaseUrl()}/api/method/${method}`;
   const headers = {
@@ -40,7 +64,8 @@ async function callMethod(method, params = {}, { httpMethod = "POST" } = {}) {
   // masquerade as an open shift and skip the shift-opening screen.
   const json = await res.json().catch(() => null);
   if (!res.ok) {
-    const message = json?.exception || json?.message || `HTTP ${res.status}`;
+    const message =
+      serverMessages(json) || json?.exception || json?.exc_type || json?.message || `HTTP ${res.status}`;
     throw new Error(`${method} gagal: ${message}`);
   }
   if (json === null) return null;
