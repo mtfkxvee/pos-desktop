@@ -2,8 +2,7 @@
 	<div ref="dropdownRef" class="relative">
 		<button
 			@click="toggleDropdown"
-			class="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 transition-colors disabled:opacity-60 disabled:cursor-wait"
-			:class="{ 'flex-row-reverse': isRTL }"
+			class="flex items-center p-1.5 sm:p-2 rounded-lg hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-colors disabled:opacity-60 disabled:cursor-wait"
 			:disabled="isChanging"
 			:title="localeConfig.nativeName"
 		>
@@ -15,12 +14,6 @@
 					:src="localeConfig.flagUrlSvg"
 					:alt="localeConfig.name"
 					class="w-5 h-3.5 sm:w-6 sm:h-4 object-cover rounded-sm shadow-sm"
-				/>
-				<span class="hidden sm:inline text-xs sm:text-sm">{{ localeConfig.nativeName }}</span>
-				<FeatherIcon
-					name="chevron-down"
-					class="w-3 h-3 sm:w-4 sm:h-4 transition-transform text-gray-500"
-					:class="{ 'rotate-180': isOpen }"
 				/>
 			</template>
 		</button>

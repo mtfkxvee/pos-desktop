@@ -57,19 +57,10 @@ export const usePOSShiftStore = defineStore("posShift", () => {
 		const days = Math.floor(diff / (1000 * 60 * 60 * 24))
 		const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60))
 		const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60))
-		const seconds = Math.floor((diff % (1000 * 60)) / 1000)
-
-		if (days > 0) {
-			const dayLabel = days === 1 ? __("Day") : __("Days")
-			const hourLabel = hours === 1 ? __("Hour") : __("Hours")
-			const minLabel = minutes === 1 ? __("Minute") : __("Minutes")
-			shiftDuration.value = `${days} ${dayLabel} ${hours} ${hourLabel} ${minutes} ${minLabel}`
-		} else {
-			const hourLabel = hours === 1 ? __("Hour") : __("Hours")
-			const minLabel = minutes === 1 ? __("Minute") : __("Minutes")
-			const secLabel = seconds === 1 ? __("Second") : __("Seconds")
-			shiftDuration.value = `${hours} ${hourLabel} ${minutes} ${minLabel} ${seconds} ${secLabel}`
-		}
+		// Compact ("2d 5h 45m") — the full "2 Days 5 Hours 45 Minutes" form
+		// crowded the header.
+		shiftDuration.value =
+			days > 0 ? `${days}d ${hours}h ${minutes}m` : `${hours}h ${minutes}m`
 	}
 
 	function updateCurrentTime() {

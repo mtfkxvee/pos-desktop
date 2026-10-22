@@ -27,56 +27,6 @@
 								<span class="absolute inset-0 bg-white/20 rounded-md animate-pulse"></span>
 								<span class="relative">v{{ appVersion }}</span>
 							</span>
-
-							<!-- Update-ready badge — non-blocking, on purpose: an outlet
-							     mid-transaction shouldn't get interrupted, they click this
-							     whenever it's actually quiet. Confirmation itself is a
-							     Teleported, centered modal (not an anchored dropdown) —
-							     an anchored popover here got clipped by this row's own
-							     overflow-hidden (needed to truncate long profile names),
-							     so it rendered invisible/cut off instead of showing at all. -->
-							<button
-								v-if="updateReady"
-								@click="showUpdatePopover = true"
-								class="inline-flex items-center gap-1 px-1.5 sm:px-2 py-0.5 text-[9px] sm:text-[10px] font-bold bg-green-100 hover:bg-green-200 text-green-700 rounded-md transition-colors animate-pulse flex-shrink-0"
-								:title="__('Update tersedia')"
-							>
-								<svg class="w-2.5 h-2.5 sm:w-3 sm:h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-									<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
-								</svg>
-								{{ __('Update') }}
-							</button>
-
-							<Teleport to="body">
-								<div
-									v-if="showUpdatePopover"
-									class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
-									@click.self="showUpdatePopover = false"
-								>
-									<div class="w-80 max-w-[90vw] bg-gray-900 rounded-xl shadow-2xl p-5">
-										<p class="text-sm font-semibold text-white mb-1.5">
-											{{ __('Update v{0} siap dipasang', [updateVersion]) }}
-										</p>
-										<p class="text-xs text-gray-400 mb-4">
-											{{ __('App akan restart sebentar untuk memasang update. Pastikan toko sedang sepi/tidak ada transaksi berjalan.') }}
-										</p>
-										<div class="flex gap-2">
-											<button
-												@click="showUpdatePopover = false"
-												class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
-											>
-												{{ __('Nanti') }}
-											</button>
-											<button
-												@click="installUpdateNow"
-												class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
-											>
-												{{ __('Update Sekarang') }}
-											</button>
-										</div>
-									</div>
-								</div>
-							</Teleport>
 						</div>
 						<p v-if="profileName" class="text-[9px] sm:text-xs text-gray-500 truncate hidden sm:block mt-0.5">{{ profileName }}</p>
 					</div>
@@ -97,7 +47,7 @@
 							variant="green"
 							size="xs"
 							:icon="shiftIcon"
-							:label="__('Shift Open:')"
+							:label="__('Shift')"
 							:value="shiftDuration"
 						/>
 					</div>
@@ -376,18 +326,10 @@ import LanguageSwitcher from "@/components/common/LanguageSwitcher.vue"
 import { DEFAULT_LOCALE } from "@/utils/currency"
 import { ref } from "vue"
 import { version } from "../../../package.json"
-import { useAppUpdate } from "@/composables/useAppUpdate"
 
 const showCacheTooltip = ref(false)
 const appVersion = version
 
-const { updateReady, updateVersion, installNow } = useAppUpdate()
-const showUpdatePopover = ref(false)
-
-function installUpdateNow() {
-	showUpdatePopover.value = false
-	installNow()
-}
 
 
 const emit = defineEmits([

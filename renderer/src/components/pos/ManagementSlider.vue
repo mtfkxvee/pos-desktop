@@ -132,8 +132,52 @@
 		<!-- Spacer -->
 		<div class="flex-1"></div>
 
-		<!-- Sync Status -->
+		<!-- Update-ready button — non-blocking, on purpose: an outlet
+		     mid-transaction shouldn't get interrupted, they click this
+		     whenever it's actually quiet. Confirmation is a Teleported,
+		     centered modal so no parent overflow can clip it. -->
+		<button
+			v-if="updateReady"
+			@click="showUpdatePopover = true"
+			class="w-12 h-12 rounded-lg flex items-center justify-center transition-all relative group bg-green-100 text-green-700 hover:bg-green-200 animate-pulse"
+			:title="__('Update tersedia')"
+		>
+			<ArrowPathIcon class="w-6 h-6" />
+			<div class="absolute start-full ms-2 px-2 py-1 bg-gray-900 text-white text-xs rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-50">
+				{{ __('Update v{0} tersedia', [updateVersion]) }}
+			</div>
+		</button>
 
+		<Teleport to="body">
+			<div
+				v-if="showUpdatePopover"
+				class="fixed inset-0 z-[1000] flex items-center justify-center bg-black/50 backdrop-blur-sm"
+				@click.self="showUpdatePopover = false"
+			>
+				<div class="w-80 max-w-[90vw] bg-gray-900 rounded-xl shadow-2xl p-5">
+					<p class="text-sm font-semibold text-white mb-1.5">
+						{{ __('Update v{0} siap dipasang', [updateVersion]) }}
+					</p>
+					<p class="text-xs text-gray-400 mb-4">
+						{{ __('App akan restart sebentar untuk memasang update. Pastikan toko sedang sepi/tidak ada transaksi berjalan.') }}
+					</p>
+					<div class="flex gap-2">
+						<button
+							@click="showUpdatePopover = false"
+							class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg bg-gray-700 hover:bg-gray-600 text-gray-200 transition-colors"
+						>
+							{{ __('Nanti') }}
+						</button>
+						<button
+							@click="installUpdateNow"
+							class="flex-1 px-3 py-2 text-xs font-semibold rounded-lg bg-green-600 hover:bg-green-700 text-white transition-colors"
+						>
+							{{ __('Update Sekarang') }}
+						</button>
+					</div>
+				</div>
+			</div>
+		</Teleport>
 
 		<!-- Printer Settings -->
 		<button
@@ -186,6 +230,15 @@ import {
 	PrinterIcon,
 	GlobeAltIcon,
 } from "@heroicons/vue/24/outline"
+import { useAppUpdate } from "@/composables/useAppUpdate"
+
+const { updateReady, updateVersion, installNow } = useAppUpdate()
+const showUpdatePopover = ref(false)
+
+function installUpdateNow() {
+	showUpdatePopover.value = false
+	installNow()
+}
 
 defineProps({
 	isSyncing: {
