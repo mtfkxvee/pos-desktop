@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, Menu, Tray, nativeImage, dialog, screen } = require("electron");
 const path = require("path");
 const fs = require("fs");
+const { execFileSync } = require("child_process");
 const { startServer } = require("../server");
 const { autoUpdater } = require("electron-updater");
 const { getDb, closeDb } = require("../server/db/client");
@@ -374,9 +375,114 @@ function createAppTray() {
   tray.on("right-click", () => tray.popUpContextMenu(buildTrayMenu()));
 }
 
+// ============================================================================
+// Startup robustness. A second NursaPOS process (double-click while one is
+// already running, or the relaunch right after an auto-update while the old
+// process is still shutting down) used to fail startServer() with
+// EADDRINUSE on port 8871 — an unhandled rejection that left the new
+// process alive with NO window, no tray and no message. Clicking the icon
+// again just stacked up more of those, until the cashier killed them all in
+// Task Manager. Now: one instance only, a short wait for a closing process,
+// and a stale NursaPOS still holding the port gets terminated; anything
+// else ends in a visible error instead of a silent invisible process.
+// ============================================================================
+const SERVER_PORT = 8871;
+let booted = false;
+
+function showExistingWindow() {
+  const win = mainWindow || loginWindow;
+  if (win && !win.isDestroyed()) {
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+  } else if (booted) {
+    openLoginWindow();
+  }
+}
+
+// PID of the process LISTENING on 127.0.0.1:<port>, via netstat (Windows only).
+function findPortOwnerPid(port) {
+  if (process.platform !== "win32") return null;
+  try {
+    const out = execFileSync("netstat", ["-ano", "-p", "tcp"], { encoding: "utf8", windowsHide: true });
+    for (const line of out.split(/\r?\n/)) {
+      const cols = line.trim().split(/\s+/);
+      if (cols[1] === `127.0.0.1:${port}` && cols[3] === "LISTENING") return Number(cols[4]) || null;
+    }
+  } catch {
+    // netstat unavailable — treat as unknown owner
+  }
+  return null;
+}
+
+function processImageName(pid) {
+  try {
+    const out = execFileSync("tasklist", ["/FI", `PID eq ${pid}`, "/FO", "CSV", "/NH"], {
+      encoding: "utf8",
+      windowsHide: true,
+    });
+    return out.split(",")[0]?.replace(/"/g, "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+// Only ever kills a process running OUR executable — never whatever else
+// might happen to be on the port.
+function killStaleInstance(port) {
+  const pid = findPortOwnerPid(port);
+  if (!pid || pid === process.pid) return false;
+  const ownImage = path.basename(process.execPath).toLowerCase();
+  if ((processImageName(pid) || "").toLowerCase() !== ownImage) return false;
+  try {
+    execFileSync("taskkill", ["/PID", String(pid), "/T", "/F"], { windowsHide: true });
+    return true;
+  } catch {
+    // e.g. the stale process runs elevated and we don't
+    return false;
+  }
+}
+
+async function startServerWithRecovery(dbPath) {
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+  let killed = false;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await startServer({ port: SERVER_PORT, dbPath });
+    } catch (err) {
+      if (err?.code !== "EADDRINUSE") throw err;
+      // First ~3s: a previous instance may just be finishing its shutdown
+      // (typical right after an auto-update relaunch).
+      if (attempt < 6) {
+        await sleep(500);
+        continue;
+      }
+      if (!killed && killStaleInstance(SERVER_PORT)) {
+        killed = true;
+        await sleep(1000);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+function failStartup(err) {
+  const inUse = err?.code === "EADDRINUSE";
+  dialog.showErrorBox(
+    "NursaPOS gagal dibuka",
+    inUse
+      ? "NursaPOS lain masih berjalan di komputer ini dan tidak bisa ditutup otomatis.\n\n" +
+          "Tutup NursaPOS lewat Task Manager (atau restart komputer), lalu buka lagi."
+      : `Terjadi kesalahan saat membuka aplikasi:\n\n${err?.message || err}`
+  );
+  app.exit(1);
+}
+
 async function bootstrap() {
   const dbPath = path.join(app.getPath("userData"), "pos-desktop.sqlite3");
-  await startServer({ port: 8871, dbPath });
+  await startServerWithRecovery(dbPath);
+  booted = true;
 
   createAppTray();
   initAutoUpdate();
@@ -424,12 +530,18 @@ ipcMain.on("install-update-now", () => {
 // instead of only ever waiting for a live push it may have already missed.
 ipcMain.handle("get-pending-update", () => pendingUpdateInfo);
 
-app.whenReady().then(bootstrap);
+if (!app.requestSingleInstanceLock()) {
+  // Already running — that instance gets 'second-instance' and shows itself.
+  app.quit();
+} else {
+  app.on("second-instance", showExistingWindow);
+  app.whenReady().then(bootstrap).catch(failStartup);
+}
 
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") app.quit();
 });
 
 app.on("activate", () => {
-  if (BrowserWindow.getAllWindows().length === 0) bootstrap();
+  if (booted && BrowserWindow.getAllWindows().length === 0) openLoginWindow();
 });
