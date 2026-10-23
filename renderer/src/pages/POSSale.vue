@@ -3422,6 +3422,11 @@ function handleViewInvoice(invoice) {
 // (pos_next.api.invoices.get_invoice_loyalty_points). Reprinting isn't a hot
 // path, so the extra round-trip is worth the correctness.
 async function handlePrintInvoice(invoiceData) {
+	// Not-yet-synced sales (shown in history too) don't exist on the server —
+	// print from the queued copy, same as the Offline Invoices dialog does.
+	if (invoiceData?.is_offline_pending && invoiceData.offline_data) {
+		return handlePrintOfflineInvoice(invoiceData.offline_data);
+	}
 	try {
 		const paperSize = getPaperSize()
 		await printInvoiceByName(invoiceData.name, null, null, paperSize)
@@ -3433,6 +3438,10 @@ async function handlePrintInvoice(invoiceData) {
 
 // Print "Surat Jalan" (Delivery Note) format for an invoice
 async function handlePrintDeliveryNote(invoiceData) {
+	if (invoiceData?.is_offline_pending) {
+		showWarning(__("Invoice belum tersinkronisasi. Sync terlebih dahulu untuk mencetak surat jalan."));
+		return;
+	}
 	try {
 		const paperSize = getPaperSize()
 		await printInvoiceByName(invoiceData.name, "POS Next Delivery Note", null, paperSize)

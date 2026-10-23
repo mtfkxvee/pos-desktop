@@ -56,15 +56,31 @@ export async function getOfflineInvoicesForHistory() {
       grand_total: grandTotal,
       paid_amount: paidAmount,
       outstanding_amount: Math.max(grandTotal - paidAmount, 0),
-      status: "Pending Sync",
+      // 'failed' = gave up retrying automatically (see server/sync/push.js);
+      // still recoverable via Sync All, but worth flagging differently.
+      status: entry.status === "failed" ? "Sync Failed" : "Pending Sync",
+      sync_error: entry.error || null,
       docstatus: 0,
       is_return: !!data.is_return,
       items: data.items || [],
       payments: data.payments || [],
       is_offline_pending: true,
       offline_id: entry.offline_id,
+      // Full queued invoice, for printing locally (it isn't on the server yet)
+      offline_data: data,
     };
   });
+}
+
+// Unlike the web POS — where an online sale goes straight to the server, so
+// "pending" only ever exists while offline — this app always saves a sale
+// locally first and pushes it in the background, so unsynced sales exist
+// while ONLINE too. Invoice history puts them on top of the server rows in
+// both cases (dropping any the server already has, e.g. synced since the
+// queue was read), instead of only when offline.
+export function withPendingInvoices(pending, serverRows) {
+  const known = new Set((serverRows || []).map((inv) => inv.name));
+  return [...(pending || []).filter((inv) => !known.has(inv.name)), ...(serverRows || [])];
 }
 
 export async function cacheInvoiceHistory(invoices, posProfile) {

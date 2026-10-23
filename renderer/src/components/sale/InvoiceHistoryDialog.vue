@@ -180,6 +180,7 @@ import { isOffline } from "@/utils/offline/offlineState"
 import {
 	getCachedInvoiceHistory,
 	getOfflineInvoicesForHistory,
+	withPendingInvoices,
 } from "@/utils/offline/sync"
 import { call } from "@/utils/apiWrapper"
 import { usePOSSettingsStore } from "@/stores/posSettings"
@@ -300,16 +301,30 @@ watch(showReturnDialog, (val) => {
 	}
 })
 
+// Sales saved locally but not on the server yet — shown on top of the list,
+// online or offline (see withPendingInvoices).
+const pendingInvoices = ref([])
+
 const filteredInvoices = computed(() => {
-	if (!searchTerm.value) return invoices.value
+	const all = withPendingInvoices(pendingInvoices.value, invoices.value)
+	if (!searchTerm.value) return all
 
 	const term = searchTerm.value.toLowerCase()
-	return invoices.value.filter(
+	return all.filter(
 		(inv) =>
 			inv.name.toLowerCase().includes(term) ||
 			inv.customer_name?.toLowerCase().includes(term),
 	)
 })
+
+async function loadPendingInvoices() {
+	try {
+		pendingInvoices.value = await getOfflineInvoicesForHistory()
+	} catch (error) {
+		console.error("Error loading pending invoices:", error)
+		pendingInvoices.value = []
+	}
+}
 
 async function loadInvoices() {
 	if (!props.posProfile) return
@@ -323,11 +338,11 @@ async function loadInvoices() {
 	if (isOffline()) {
 		offlineLoading.value = true
 		try {
-			const [pending, cached] = await Promise.all([
-				getOfflineInvoicesForHistory(),
+			const [, cached] = await Promise.all([
+				loadPendingInvoices(),
 				getCachedInvoiceHistory(props.posProfile, { limit: pageSize }),
 			])
-			invoices.value = [...pending, ...cached]
+			invoices.value = cached
 			hasMore.value = false
 		} catch (error) {
 			console.error("Error loading offline invoice history:", error)
@@ -338,6 +353,7 @@ async function loadInvoices() {
 		return
 	}
 
+	loadPendingInvoices()
 	invoicesResource.reload()
 }
 
@@ -374,7 +390,11 @@ async function openLabelDialog(invoice) {
 		// InvoiceDetailDialog.vue already uses, instead of the old app's direct
 		// same-origin `/api/resource/Sales Invoice/<name>` REST call (which has
 		// no Electron equivalent — there's no same-origin Frappe site here).
-		const doc = await call("pos_next.api.invoices.get_invoice", { invoice_name: invoice.name })
+		// A not-yet-synced sale doesn't exist on the server — its items are
+		// already in the local queue entry.
+		const doc = invoice.is_offline_pending
+			? invoice
+			: await call("pos_next.api.invoices.get_invoice", { invoice_name: invoice.name })
 
 		labelRemarks.value = doc?.remarks || ""
 		labelServing.value = doc?.custom_serving || ""

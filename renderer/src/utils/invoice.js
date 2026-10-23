@@ -16,6 +16,11 @@ export function getInvoiceStatusColor(invoice) {
 		return "bg-purple-100 text-purple-800"
 	}
 
+	// Saved locally, automatic retries exhausted — Sync All re-reviews it
+	if (status === "sync failed") {
+		return "bg-red-100 text-red-800"
+	}
+
 	// Red for overdue, cancelled
 	if (status === "overdue" || invoice.docstatus === 2) {
 		return "bg-red-100 text-red-800"

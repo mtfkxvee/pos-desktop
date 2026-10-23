@@ -683,6 +683,7 @@ import {
 	getCachedUnpaidSummary,
 	getCachedInvoiceHistory,
 	getOfflineInvoicesForHistory,
+	withPendingInvoices,
 } from "@/utils/offline/sync"
 import { logger } from "@/utils/logger"
 import { friendlyError } from "@/utils/errorHandler"
@@ -733,6 +734,18 @@ const historyOffset = ref(0)
 const historyHasMore = ref(true)
 const historyLoadingMore = ref(false)
 const historyInitialLoading = ref(false)
+// Sales saved locally but not on the server yet — shown on top of the
+// history, online or offline (see withPendingInvoices).
+const pendingHistoryInvoices = ref([])
+
+async function loadPendingHistoryInvoices() {
+	try {
+		pendingHistoryInvoices.value = await getOfflineInvoicesForHistory()
+	} catch (e) {
+		log.error("Error loading pending invoices:", e)
+		pendingHistoryInvoices.value = []
+	}
+}
 
 async function loadHistoryPage(reset = false) {
 	if (reset) {
@@ -740,6 +753,7 @@ async function loadHistoryPage(reset = false) {
 		historyOffset.value = 0
 		historyHasMore.value = true
 		historyInitialLoading.value = true
+		loadPendingHistoryInvoices()
 	} else {
 		if (!historyHasMore.value || historyLoadingMore.value) return
 		historyLoadingMore.value = true
@@ -749,11 +763,9 @@ async function loadHistoryPage(reset = false) {
 	// previously cached server history. No pagination available offline.
 	if (isOffline()) {
 		try {
-			const [pending, cached] = await Promise.all([
-				getOfflineInvoicesForHistory(),
-				getCachedInvoiceHistory(props.posProfile, { limit: PAGE_SIZE }),
-			])
-			localHistoryInvoices.value = [...pending, ...cached]
+			localHistoryInvoices.value = await getCachedInvoiceHistory(props.posProfile, {
+				limit: PAGE_SIZE,
+			})
 			historyHasMore.value = false
 		} catch (e) {
 			log.error("Error loading offline invoice history:", e)
@@ -885,9 +897,21 @@ watch(
 
 // Use local history invoices (self-fetched) instead of props, falling back to
 // server-side search results (covering ALL matches) while a search is active
-const historyBaseInvoices = computed(() =>
-	isHistorySearchActive.value ? historySearchResults.value : localHistoryInvoices.value,
-)
+const historyBaseInvoices = computed(() => {
+	if (!isHistorySearchActive.value) {
+		return withPendingInvoices(pendingHistoryInvoices.value, localHistoryInvoices.value)
+	}
+	// Server search can't see unsynced sales — match those locally.
+	const term = trimmedSearchTerm.value.toLowerCase()
+	const pending = term
+		? pendingHistoryInvoices.value.filter(
+				(inv) =>
+					inv.name?.toLowerCase().includes(term) ||
+					inv.customer_name?.toLowerCase().includes(term),
+			)
+		: pendingHistoryInvoices.value
+	return withPendingInvoices(pending, historySearchResults.value)
+})
 const historyInvoicesRef = computed(() => historyBaseInvoices.value)
 const invoiceFilters = useInvoiceFilters(historyInvoicesRef)
 
