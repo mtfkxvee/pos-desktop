@@ -163,6 +163,10 @@ export const offlineWorker = {
   },
 
   // --- offline invoice queue -------------------------------------------------
+  // {pending, failed, synced, syncing} — syncing: the server's push is running.
+  async getQueueStatus() {
+    return getJSON("/invoices/queue-status");
+  },
   async getOfflineInvoiceCount() {
     const r = await getJSON("/invoices/queue-status");
     return (r.pending || 0) + (r.failed || 0);

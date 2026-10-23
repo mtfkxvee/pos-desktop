@@ -197,9 +197,14 @@ function startServer({ port = 8871, dbPath } = {}) {
     // Pull and push are independent — a hiccup in one (e.g. a flaky
     // connection dropping mid-request) shouldn't 500 the whole cycle and
     // spam the renderer's error toast; report per-step errors instead.
+    // Push first: it's what the cashier is waiting on when they click Sync,
+    // and it re-reviews already-failed rows too (retryFailed), since the
+    // cause may have been fixed on the server since.
+    const push = await pushQueuedInvoices({ retryFailed: true }).catch((err) => ({ error: err.message }));
     const pull = await pullAll().catch((err) => ({ error: err.message }));
-    const push = await pushQueuedInvoices().catch((err) => ({ error: err.message }));
-    res.json({ online: true, pull, push });
+    // push's counts at the top level too — the renderer's syncAllPending
+    // reads result.success/failed/errors directly.
+    res.json({ online: true, ...push, pull, push });
   });
 
   // Per-category manual sync (SyncStatusDialog's individual "Sync" buttons)

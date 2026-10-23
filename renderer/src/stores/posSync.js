@@ -23,7 +23,6 @@ import {
 	cacheInvoiceHistory,
 	cacheUnpaidInvoices,
 	cacheUnpaidSummary,
-	getOfflineInvoiceCount,
 	getOfflineInvoices,
 	saveOfflineInvoice as saveOfflineInvoiceUtil,
 	deleteOfflineInvoice as deleteOfflineInvoiceUtil,
@@ -52,8 +51,15 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	/** Number of invoices pending sync */
 	const pendingInvoicesCount = ref(0)
 
-	/** Whether a sync operation is in progress */
-	const isSyncing = ref(false)
+	/** A sync started from this renderer (Sync / Sync All) is in progress */
+	const manualSyncing = ref(false)
+
+	/** The local server's own background push is running (scheduler) */
+	const backgroundSyncing = ref(false)
+
+	/** Whether a sync operation is in progress — either kind, so the header
+	 *  indicator keeps blinking for the whole time invoices are being sent */
+	const isSyncing = computed(() => manualSyncing.value || backgroundSyncing.value)
 
 	/** Current connection quality metrics */
 	const connectionQuality = ref(offlineState.getConnectionQuality())
@@ -116,7 +122,9 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function updatePendingCount() {
 		try {
-			pendingInvoicesCount.value = await getOfflineInvoiceCount()
+			const status = await offlineWorker.getQueueStatus()
+			pendingInvoicesCount.value = (status.pending || 0) + (status.failed || 0)
+			backgroundSyncing.value = !!status.syncing
 		} catch (error) {
 			log.error("Failed to get pending invoice count", error)
 		}
@@ -131,7 +139,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			throw new Error("Cannot sync while offline")
 		}
 
-		isSyncing.value = true
+		manualSyncing.value = true
 		try {
 			const result = await syncOfflineInvoices()
 			await updatePendingCount()
@@ -140,7 +148,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			log.error("Failed to sync invoices", error)
 			throw error
 		} finally {
-			isSyncing.value = false
+			manualSyncing.value = false
 		}
 	}
 
@@ -265,8 +273,10 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 
 			if (result.success > 0) {
 				showSuccess(__("{0} invoice(s) synced successfully", [result.success]))
-				await loadPendingInvoices()
 			}
+			// Always refresh: rows re-reviewed by this sync may have changed
+			// status (failed → pending → synced) even when none succeeded.
+			await loadPendingInvoices()
 
 			return result
 		} catch (error) {

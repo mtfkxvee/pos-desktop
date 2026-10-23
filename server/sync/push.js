@@ -110,48 +110,90 @@ async function syncInvoiceToServer(row, retryCount = 0) {
   }
 }
 
-let syncing = false;
+let currentRun = null;
 
-async function pushQueuedInvoices() {
-  if (syncing) return { success: 0, failed: 0, skipped: 0, alreadyRunning: true };
-  syncing = true;
-  try {
-    const online = await pingServer();
-    if (!online) return { success: 0, failed: 0, skipped: 0, offline: true };
+function isPushRunning() {
+  return !!currentRun;
+}
 
-    // Customers first so any queued invoice referencing a temp customer id
-    // gets repointed to the real one before we try to submit it.
-    await pushQueuedCustomers().catch(() => {});
-    // Shifts opened offline must exist on the server before any invoice that
-    // references them is submitted.
-    await pushQueuedShifts().catch(() => {});
+// Manual "Sync" re-reviews everything not yet on the server, including rows
+// that exhausted their automatic retries ('failed'). The cause is often fixed
+// on the server afterwards (e.g. a closing shift cancelled so the invoice's
+// shift is open again), and before this a failed row was skipped by every
+// sync forever unless retried one by one from the Offline Invoices dialog.
+function requeueFailed() {
+  const db = getDb();
+  const now = new Date().toISOString();
+  const invoices = db
+    .prepare("UPDATE invoice_queue SET status='pending', retry_count=0, updated_at=? WHERE status='failed'")
+    .run(now).changes;
+  db.prepare("UPDATE customer_queue SET status='pending', retry_count=0, updated_at=? WHERE status='failed'").run(now);
+  return invoices;
+}
 
-    const db = getDb();
-    const rows = db
-      .prepare("SELECT * FROM invoice_queue WHERE status = 'pending' ORDER BY id ASC")
-      .all();
-
-    const result = { success: 0, failed: 0, skipped: 0, errors: [] };
-    for (const row of rows) {
-      const shiftName = JSON.parse(row.payload).invoice?.posa_pos_opening_shift;
-      if (isShiftPending(shiftName)) {
-        result.skipped++;
-        continue;
-      }
-      try {
-        const r = await syncInvoiceToServer(row);
-        if (r.status === "success") result.success++;
-        else if (r.status === "skipped") result.skipped++;
-      } catch (err) {
-        handleSyncFailure(row, err.message || String(err));
-        result.failed++;
-        result.errors.push({ offlineId: row.offline_id, error: err.message });
-      }
-    }
-    return result;
-  } finally {
-    syncing = false;
+/**
+ * @param {{retryFailed?: boolean}} opts retryFailed: manual sync — also
+ *   re-review rows that already gave up retrying (see requeueFailed).
+ */
+async function pushQueuedInvoices({ retryFailed = false } = {}) {
+  if (currentRun) {
+    // The scheduler's run is mid-way: a background caller just skips, but a
+    // manual click waits for it and then runs its own full pass, so the
+    // cashier's click is never silently swallowed.
+    if (!retryFailed) return { success: 0, failed: 0, skipped: 0, alreadyRunning: true };
+    await currentRun.catch(() => {});
+    return pushQueuedInvoices({ retryFailed });
   }
+  currentRun = runPush(retryFailed);
+  try {
+    return await currentRun;
+  } finally {
+    currentRun = null;
+  }
+}
+
+async function runPush(retryFailed) {
+  const online = await pingServer();
+  if (!online) return { success: 0, failed: 0, skipped: 0, offline: true };
+
+  const requeued = retryFailed ? requeueFailed() : 0;
+
+  // Customers first so any queued invoice referencing a temp customer id
+  // gets repointed to the real one before we try to submit it.
+  await pushQueuedCustomers().catch(() => {});
+  // Shifts opened offline must exist on the server before any invoice that
+  // references them is submitted.
+  await pushQueuedShifts().catch(() => {});
+
+  const db = getDb();
+  const rows = db
+    .prepare("SELECT * FROM invoice_queue WHERE status = 'pending' ORDER BY id ASC")
+    .all();
+
+  const result = { success: 0, failed: 0, skipped: 0, requeued, errors: [] };
+  for (const row of rows) {
+    const shiftName = JSON.parse(row.payload).invoice?.posa_pos_opening_shift;
+    if (isShiftPending(shiftName)) {
+      result.skipped++;
+      continue;
+    }
+    try {
+      const r = await syncInvoiceToServer(row);
+      if (r.status === "success") result.success++;
+      else if (r.status === "skipped") result.skipped++;
+    } catch (err) {
+      handleSyncFailure(row, err.message || String(err));
+      result.failed++;
+      const invoice = JSON.parse(row.payload).invoice || {};
+      result.errors.push({
+        offlineId: row.offline_id,
+        invoiceId: row.id,
+        customer: invoice.customer_name || invoice.customer,
+        error: err.message,
+      });
+    }
+  }
+  return result;
 }
 
 function getQueueStatus() {
@@ -161,6 +203,9 @@ function getQueueStatus() {
     .all();
   const counts = { pending: 0, synced: 0, failed: 0 };
   for (const r of rows) counts[r.status] = r.count;
+  // Lets the renderer keep its sync indicator blinking for background
+  // (scheduler) runs too, not just the manual click it started itself.
+  counts.syncing = isPushRunning();
   return counts;
 }
 
@@ -313,4 +358,4 @@ async function pushQueuedCustomers() {
   return result;
 }
 
-module.exports = { pushQueuedInvoices, pushQueuedCustomers, getQueueStatus, checkOfflineIdSynced };
+module.exports = { pushQueuedInvoices, pushQueuedCustomers, getQueueStatus, checkOfflineIdSynced, isPushRunning };
