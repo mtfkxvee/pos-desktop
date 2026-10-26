@@ -49,15 +49,72 @@ function cleanErrorMessage(rawMessage) {
 	return text.replace(/\s+/g, " ").trim()
 }
 
+// ERPNext field labels that show up in "Value missing for: X" messages.
+const FIELD_LABELS_ID = {
+	"item name": "Nama Item",
+	item: "Item",
+	"item code": "Kode Item",
+	customer: "Pelanggan",
+	"mode of payment": "Metode Pembayaran",
+	warehouse: "Gudang",
+	uom: "Satuan",
+	qty: "Jumlah",
+	quantity: "Jumlah",
+	rate: "Harga",
+	"price list": "Daftar Harga",
+	company: "Perusahaan",
+	"pos profile": "POS Profile",
+	"cost center": "Cost Center",
+	account: "Akun",
+}
+
+// Known English messages coming back from ERPNext / pos_next / the local
+// sync server, rewritten into Indonesian for cashiers. Order matters: more
+// specific patterns first. Anything unmatched is shown as-is.
+const SERVER_MESSAGE_RULES = [
+	[/\S*pos_next\.api\.[\w.]+ gagal:\s*/g, () => "Gagal kirim ke server: "],
+	[/\s*\|\s*Error:\s*/g, () => " | "],
+	[/Payment methods refreshed\.?\s*Please review before proceeding\.?/gi, () => "Metode pembayaran diperbarui, silakan cek sebelum melanjutkan."],
+	[/(?:Sales Invoice Item |Sales Invoice Payment |Sales Order Item )?Row #?\s*(\d+)\s*:/gi, (_, n) => `Baris #${n}:`],
+	[/Value missing for:?\s*([^|.]+?)(?=\s*(?:\||$|\.))/gi, (_, f) => `Data wajib belum diisi: ${FIELD_LABELS_ID[f.trim().toLowerCase()] || f.trim()}`],
+	[/Mandatory fields required in [^:]*:?\s*/gi, () => "Data wajib belum diisi: "],
+	[/(\d+(?:\.\d+)?)\s+units?\s+of\s+(?:Item\s+)?(.+?)\s+needed\s+in\s+(?:Warehouse\s+)?(.+?)(?:\s+on\s+.+?)?\s+to complete this transaction\.?/gi,
+		(_, q, item, wh) => `Stok "${item}" kurang ${q} di gudang ${wh}.`],
+	[/Deadlock found when trying to get lock;?\s*try restarting transaction\.?/gi, () => "Server sedang sibuk, silakan coba lagi."],
+	[/Document has been modified after you have opened it[^.|]*\.?/gi, () => "Dokumen sudah diubah di tempat lain. Muat ulang lalu coba lagi."],
+	[/Insufficient Permission for\s+/gi, () => "Tidak punya izin untuk "],
+	[/\bNot permitted\b\.?/gi, () => "Tidak diizinkan."],
+	[/Could not find\s+(.+?)(?=\s*(?:\||$))/gi, (_, x) => `${x} tidak ditemukan`],
+	[/\b(Item|Customer|Warehouse|Mode of Payment)\s+(.+?)\s+is disabled\b\.?/gi, (_, t, x) => `${FIELD_LABELS_ID[t.toLowerCase()] || t} ${x} dinonaktifkan.`],
+	[/Request Timed Out|timed out/gi, () => "Waktu habis menunggu server"],
+	[/Failed to fetch|NetworkError[^|]*/gi, () => "Tidak bisa terhubung ke server"],
+]
+
+/**
+ * Translate a raw server / sync error message into Indonesian where a known
+ * pattern matches. Safe to call on already-Indonesian or unknown text.
+ * @param {string} message
+ * @returns {string}
+ */
+export function translateServerMessage(message) {
+	if (!message || typeof message !== "string") return message
+	let text = message
+	for (const [pattern, replace] of SERVER_MESSAGE_RULES) {
+		text = text.replace(pattern, replace)
+	}
+	return text
+}
+
 /**
  * Parse error and return structured error information
  * @param {Error} error - The error object from API call
  * @returns {Object} - Structured error information
  */
 export function parseError(error) {
+	const defaultMessage = __("Terjadi kesalahan yang tidak terduga")
 	const context = {
-		title: __("Error"),
-		message: __("An unexpected error occurred"),
+		title: __("Kesalahan"),
+		message: defaultMessage,
 		type: "error", // error, warning, validation
 		retryable: false,
 		technicalDetails: null,
@@ -76,16 +133,16 @@ export function parseError(error) {
 	// Detect error type from status code
 	if (error.httpStatus === 417 || error.status === 417) {
 		context.type = "validation"
-		context.title = __("Validation Error")
+		context.title = __("Data Tidak Valid")
 	} else if (error.httpStatus === 403 || error.status === 403) {
 		context.type = "error"
-		context.title = __("Permission Denied")
+		context.title = __("Akses Ditolak")
 	} else if (error.httpStatus === 404 || error.status === 404) {
 		context.type = "warning"
-		context.title = __("Not Found")
+		context.title = __("Tidak Ditemukan")
 	} else if (error.httpStatus >= 500 || error.status >= 500) {
 		context.type = "error"
-		context.title = __("Server Error")
+		context.title = __("Server Bermasalah")
 	}
 
 	// Extract primary message
@@ -124,7 +181,7 @@ export function parseError(error) {
 		normalizedMessage.includes("negative stock")
 	) {
 		context.type = "warning"
-		context.title = __("Insufficient Stock")
+		context.title = __("Stok Tidak Cukup")
 
 		// Parse the message to extract item and quantity information
 		// Example: "1.0 units of Item IPhone 17-WHI needed in Warehouse Goods In Transit - BrD"
@@ -135,14 +192,10 @@ export function parseError(error) {
 		if (match) {
 			const [, quantity, itemName, warehouse] = match
 			const qty = Number.parseFloat(quantity)
-			const unit = qty === 1 ? "unit" : "units"
-			context.message = `Not enough stock for "${itemName}".\n\nYou need ${qty} ${unit} but the warehouse "${warehouse}" doesn't have enough available.\n\nPlease reduce the quantity or check another warehouse.`
-		} else if (
-			!context.message ||
-			context.message === "An unexpected error occurred"
-		) {
+			context.message = `Stok "${itemName}" tidak cukup.\n\nButuh ${qty}, tapi stok di gudang "${warehouse}" tidak mencukupi.\n\nKurangi jumlahnya atau cek gudang lain.`
+		} else if (!context.message || context.message === defaultMessage) {
 			context.message = __(
-				"Not enough stock available in the warehouse.\n\nPlease reduce the quantity or check stock availability.",
+				"Stok di gudang tidak cukup.\n\nKurangi jumlahnya atau cek ketersediaan stok.",
 			)
 		}
 
@@ -151,7 +204,7 @@ export function parseError(error) {
 	// Validation Errors
 	else if (excType === "validationerror" || context.type === "validation") {
 		context.type = "validation"
-		context.title = __("Validation Error")
+		context.title = __("Data Tidak Valid")
 		context.retryable = true
 	}
 	// Price List Errors
@@ -160,7 +213,7 @@ export function parseError(error) {
 		normalizedMessage.includes("price not found")
 	) {
 		context.type = "warning"
-		context.title = __("Pricing Error")
+		context.title = __("Harga Bermasalah")
 		context.retryable = true
 	}
 	// Customer/Party Errors
@@ -169,7 +222,7 @@ export function parseError(error) {
 		normalizedMessage.includes("party")
 	) {
 		context.type = "validation"
-		context.title = __("Customer Error")
+		context.title = __("Data Pelanggan Bermasalah")
 		context.retryable = true
 	}
 	// Tax Errors
@@ -178,7 +231,7 @@ export function parseError(error) {
 		normalizedMessage.includes("account")
 	) {
 		context.type = "warning"
-		context.title = __("Tax Configuration Error")
+		context.title = __("Pengaturan Pajak Bermasalah")
 		context.retryable = false
 	}
 	// Payment Errors
@@ -187,7 +240,7 @@ export function parseError(error) {
 		normalizedMessage.includes("mode of payment")
 	) {
 		context.type = "validation"
-		context.title = __("Payment Error")
+		context.title = __("Pembayaran Bermasalah")
 		context.retryable = true
 	}
 	// Series/Naming Errors
@@ -196,7 +249,7 @@ export function parseError(error) {
 		normalizedMessage.includes("naming")
 	) {
 		context.type = "error"
-		context.title = __("Naming Series Error")
+		context.title = __("Penomoran Dokumen Bermasalah")
 		context.retryable = false
 	}
 	// Permission Errors
@@ -205,7 +258,7 @@ export function parseError(error) {
 		normalizedMessage.includes("not allowed")
 	) {
 		context.type = "error"
-		context.title = __("Permission Denied")
+		context.title = __("Akses Ditolak")
 		context.retryable = false
 	}
 	// Network/Connection Errors
@@ -216,9 +269,9 @@ export function parseError(error) {
 		normalizedMessage.includes("fetch")
 	) {
 		context.type = "warning"
-		context.title = __("Connection Error")
+		context.title = __("Koneksi Bermasalah")
 		context.message = __(
-			"Unable to connect to server. Check your internet connection.",
+			"Tidak bisa terhubung ke server. Cek koneksi internet.",
 		)
 		context.retryable = true
 	}
@@ -228,9 +281,12 @@ export function parseError(error) {
 		normalizedMessage.includes("already exists")
 	) {
 		context.type = "validation"
-		context.title = __("Duplicate Entry")
+		context.title = __("Data Duplikat")
 		context.retryable = false
 	}
+
+	// Categorization above matches on ERPNext's English text, so translate last.
+	context.message = translateServerMessage(context.message)
 
 	return context
 }
@@ -278,21 +334,21 @@ export function formatErrorReport(errorContext, additionalInfo = {}) {
  * @returns {string}
  */
 export function friendlyError(error, defaultMsg) {
-	const fallback = defaultMsg || __("An error occurred. Please try again.")
+	const fallback = defaultMsg || __("Terjadi kesalahan. Silakan coba lagi.")
 
 	const excType = (error?.exc_type || "").toLowerCase()
 
 	// DB-level uniqueness constraint — always replace with something readable
 	if (excType === "uniquevalidationerror" || excType.includes("integrity")) {
-		return __("Data already exists. Please use a different value.")
+		return __("Data sudah ada. Gunakan nilai lain.")
 	}
 
 	// Permission / auth errors
 	if (excType === "permissionerror" || error?.httpStatus === 403) {
-		return __("You do not have permission to perform this action.")
+		return __("Tidak punya izin untuk melakukan tindakan ini.")
 	}
 	if (excType === "authenticationerror" || error?.httpStatus === 401) {
-		return __("Your session has expired. Please log in again.")
+		return __("Sesi sudah habis. Silakan login lagi.")
 	}
 
 	// Use parseError to extract a cleaned message

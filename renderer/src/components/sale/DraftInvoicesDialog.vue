@@ -273,7 +273,7 @@ async function handlePrintDraft(draft) {
 		await printInvoiceCustom(invoiceData, getEffectiveFormat())
 	} catch (error) {
 		console.error("Error printing draft:", error)
-		showError(__("Failed to print draft"))
+		showError(__("Gagal mencetak draft"))
 	}
 }
 
@@ -303,7 +303,7 @@ async function confirmDeleteDraft() {
 		showSuccess(__("Draft invoice deleted"))
 	} catch (error) {
 		console.error("Error deleting draft:", error)
-		showError(__("Failed to delete draft"))
+		showError(__("Gagal menghapus draft"))
 	}
 }
 
@@ -319,7 +319,7 @@ async function confirmClearAll() {
 		showSuccess(__("All draft invoices deleted"))
 	} catch (error) {
 		console.error("Error clearing drafts:", error)
-		showError(__("Failed to clear drafts"))
+		showError(__("Gagal menghapus semua draft"))
 	}
 }
 

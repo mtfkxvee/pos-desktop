@@ -98,7 +98,7 @@ export function useShift() {
 		},
 		onError(error) {
 			console.error("Error creating opening shift:", error)
-			showError(friendlyError(error, __("Failed to open shift. Please try again.")))
+			showError(friendlyError(error, __("Gagal membuka shift. Silakan coba lagi.")))
 		},
 	})
 
@@ -130,7 +130,7 @@ export function useShift() {
 		},
 		onError(error) {
 			console.error("Error submitting closing shift:", error)
-			showError(friendlyError(error, __("Failed to close shift. Please try again.")))
+			showError(friendlyError(error, __("Gagal menutup shift. Silakan coba lagi.")))
 		},
 	})
 

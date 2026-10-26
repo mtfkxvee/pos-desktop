@@ -35,7 +35,7 @@
               </div>
             </div>
             <div v-else class="text-center py-8 text-gray-500">
-              <p>{{ __('No POS Profiles available. Please contact your administrator.') }}</p>
+              <p>{{ __('Tidak ada POS Profile. Hubungi administrator.') }}</p>
             </div>
           </div>
 

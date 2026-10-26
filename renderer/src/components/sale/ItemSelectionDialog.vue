@@ -75,7 +75,7 @@
 
 					<!-- Warning if combination not found -->
 					<div v-else-if="allAttributesSelected" class="mt-4 p-3 bg-orange-50 border border-orange-200 rounded-lg">
-						<p class="text-xs text-orange-700">{{ __('This combination is not available') }}</p>
+						<p class="text-xs text-orange-700">{{ __('Kombinasi ini tidak tersedia') }}</p>
 					</div>
 				</div>
 
@@ -297,7 +297,7 @@ const stockWarning = computed(() => {
 	if (availableStock === null) return null
 
 	if (quantity.value > availableStock) {
-		return __("Requested quantity ({0}) exceeds available stock ({1})", [
+		return __("Jumlah yang diminta ({0}) melebihi stok tersedia ({1})", [
 			quantity.value,
 			Math.floor(availableStock),
 		])

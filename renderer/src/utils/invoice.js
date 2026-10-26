@@ -80,3 +80,31 @@ export function getInvoiceStatusTheme(status) {
 
 	return "gray"
 }
+
+/**
+ * Find cart rows that would be rejected by ERPNext with
+ * "Value missing for: Item Name" (blank item_code or item_name).
+ * @param {Array} items - Cart items
+ * @returns {Array<{row: number, item_code: string}>} 1-based row numbers of offending items
+ */
+export function findItemsWithoutName(items) {
+	const missing = []
+	;(items || []).forEach((item, index) => {
+		if (!String(item?.item_code || "").trim() || !String(item?.item_name || "").trim()) {
+			missing.push({ row: index + 1, item_code: item?.item_code || "" })
+		}
+	})
+	return missing
+}
+
+/**
+ * Build the user-facing error for rows found by findItemsWithoutName().
+ * @param {Array<{row: number, item_code: string}>} missing
+ * @returns {string}
+ */
+export function formatItemsWithoutNameError(missing) {
+	const rows = missing
+		.map((m) => (m.item_code ? `#${m.row} (${m.item_code})` : `#${m.row}`))
+		.join(", ")
+	return __("Ada item tanpa nama di keranjang baris {0}. Hapus baris tersebut lalu tambahkan ulang itemnya.", [rows])
+}

@@ -366,7 +366,7 @@ async function loadEntries(reset = false) {
 		entries.value = reset ? rows : [...entries.value, ...rows]
 		hasMore.value = rows.length === PAGE_SIZE
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to load closing history.")))
+		showError(friendlyError(e, __("Gagal memuat riwayat closing.")))
 	} finally {
 		loading.value = false
 	}
@@ -388,7 +388,7 @@ async function handlePrint(name) {
 		const data = await call("pos_next.api.pos_closing.get_pos_closing_shift_print_data", { name })
 		await printShiftClosing(data, getPaperSize())
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to print closing report.")))
+		showError(friendlyError(e, __("Gagal mencetak laporan closing.")))
 	} finally {
 		printingName.value = null
 	}

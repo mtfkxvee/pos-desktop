@@ -114,7 +114,7 @@
 						<p class="text-sm text-amber-800">
 							{{ __('Belum tersinkron ke server. {0} invoice menunggu shift ini.', [shift.invoice_count]) }}
 						</p>
-						<p v-if="shift.last_error" class="text-xs text-red-700 break-words">{{ shift.last_error }}</p>
+						<p v-if="shift.last_error" class="text-xs text-red-700 break-words">{{ translateServerMessage(shift.last_error) }}</p>
 						<div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
 							<button
 								@click="handleRetryOfflineShifts"
@@ -178,6 +178,7 @@
 
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from "vue"
+import { translateServerMessage } from "@/utils/errorHandler"
 import {
 	XMarkIcon,
 	ArrowPathIcon,
@@ -285,7 +286,7 @@ async function handleSyncType(type) {
 		const res = await fetch(`${BASE}/sync/run/${type}`, { method: "POST" })
 		const data = await res.json()
 		if (!res.ok || data.error) {
-			showError(data.error || __("Sync gagal"))
+			showError(translateServerMessage(data.error) || __("Sync gagal"))
 		} else if (data.online === false) {
 			showError(__("Tidak bisa sync — server tidak terjangkau."))
 		} else {
@@ -340,7 +341,7 @@ async function handleUseActiveShift(shift) {
 		const res = await fetch(`${BASE}/sync/offline-shifts/${encodeURIComponent(shift.offline_name)}/use-active`, { method: "POST" })
 		const data = await res.json()
 		if (!res.ok || data.error) {
-			showError(data.error || __("Gagal memakai shift aktif"))
+			showError(translateServerMessage(data.error) || __("Gagal memakai shift aktif"))
 		} else {
 			showSuccess(__("Invoice dipindah ke shift aktif di server."))
 			await checkOpeningShift.fetch()

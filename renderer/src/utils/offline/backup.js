@@ -72,7 +72,7 @@ export async function importBackupFromFile(file) {
 	const parsed = JSON.parse(text)
 
 	if (parsed.type !== "pos_offline_backup") {
-		throw new Error("Invalid backup file format")
+		throw new Error("Format file backup tidak valid")
 	}
 
 	const invoices = parsed.invoices || []

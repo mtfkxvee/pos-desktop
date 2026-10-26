@@ -164,7 +164,7 @@
 							/>
 						</svg>
 						<div class="flex-1">
-							<p class="text-sm font-medium text-amber-900">{{ __("Permission Required") }}</p>
+							<p class="text-sm font-medium text-amber-900">{{ __("Butuh Izin Akses") }}</p>
 							<p class="text-xs text-amber-700 mt-0.5">
 								{{ __("You don't have permission to create customers. Contact your administrator.") }}
 							</p>
@@ -371,7 +371,7 @@ const createCustomerResource = createResource({
 		if (msg.includes("UniqueValidationError") || msg.includes("Duplicate entry")) {
 			showError(__("Kode pelanggan {0} sudah digunakan. Gunakan kode lain.", [customerData.value.custom_kode_pelanggan]))
 		} else {
-			showError(msg || __("Failed to create customer"))
+			showError(msg || __("Gagal membuat pelanggan"))
 		}
 	},
 })
@@ -402,7 +402,7 @@ const updateCustomerResource = createResource({
 		if (msg.includes("UniqueValidationError") || msg.includes("Duplicate entry")) {
 			showError(__("Kode pelanggan {0} sudah digunakan. Gunakan kode lain.", [customerData.value.custom_kode_pelanggan]))
 		} else {
-			showError(friendlyError(error, __("Failed to update customer")))
+			showError(friendlyError(error, __("Gagal memperbarui pelanggan")))
 		}
 	},
 })
@@ -496,10 +496,10 @@ const checkPermissions = async () => {
 
 const handleCreate = async () => {
 	if (!customerData.value.customer_name) {
-		return showError(__("Customer Name is required"))
+		return showError(__("Nama pelanggan wajib diisi"))
 	}
 	if (!customerData.value.custom_kode_pelanggan) {
-		return showError(__("Customer Code is required"))
+		return showError(__("Kode pelanggan wajib diisi"))
 	}
 	if (isEditMode.value) {
 		await updateCustomerResource.submit()
@@ -543,7 +543,7 @@ const handleCreate = async () => {
 			show.value = false
 		} catch (error) {
 			log.error("Error saving customer offline", error)
-			showError(friendlyError(error, __("Failed to save customer offline")))
+			showError(friendlyError(error, __("Gagal menyimpan pelanggan secara offline")))
 		}
 	} else {
 		await createCustomerResource.submit()

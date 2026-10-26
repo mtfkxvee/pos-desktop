@@ -484,7 +484,7 @@
 						{{ __("Welcome to NursaPOS") }}
 					</h3>
 					<p class="mt-2 text-sm text-gray-500">
-						{{ __("Please open a shift to start making sales") }}
+						{{ __("Buka shift dulu untuk mulai transaksi") }}
 					</p>
 					<Button
 						variant="solid"
@@ -1014,12 +1014,12 @@
 			<!-- Error Dialog -->
 			<Dialog
 				v-model="uiStore.showErrorDialog"
-				:options="{ title: uiStore.errorDialogTitle || __('Error'), size: 'md' }"
+				:options="{ title: uiStore.errorDialogTitle || __('Kesalahan'), size: 'md' }"
 			>
 				<template #body-content>
 					<div class="py-3">
 						<p class="text-sm text-gray-700 whitespace-pre-line">
-							{{ uiStore.errorDialogMessage || __("An unexpected error occurred.") }}
+							{{ uiStore.errorDialogMessage || __("Terjadi kesalahan yang tidak terduga.") }}
 						</p>
 						<div
 							v-if="uiStore.errorDetails"
@@ -1174,6 +1174,7 @@ import { offlineState } from "@/utils/offline/offlineState";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import { generateOfflineInvoiceId } from "@/utils/offline/invoiceId";
 import { printInvoiceByName, printInvoiceCustom } from "@/utils/printInvoice";
+import { findItemsWithoutName, formatItemsWithoutNameError } from "@/utils/invoice";
 import { usePrintFormat } from "@/composables/usePrintFormat";
 import { useVersionCheck } from "@/composables/useVersionCheck";
 import PrintFormatDialog from "@/components/pos/PrintFormatDialog.vue";
@@ -2133,7 +2134,7 @@ function handleItemSelected(item, autoAdd = false) {
 			}
 		} catch (error) {
 			uiStore.showError(
-				__("Insufficient Stock"),
+				__("Gagal Menambahkan Item"),
 				error.message,
 				__("Item: {0}", [item.item_code])
 			);
@@ -2159,11 +2160,11 @@ function handleItemSelected(item, autoAdd = false) {
 			showError(
 				item.is_bundle
 					? __(
-							'"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.',
+							'"{0}" tidak bisa dimasukkan ke keranjang. Stok bundle habis dan stok minus tidak diizinkan.',
 							[item.item_name]
 					  )
 					: __(
-							'"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.',
+							'"{0}" tidak bisa dimasukkan ke keranjang. Stok item habis dan stok minus tidak diizinkan.',
 							[item.item_name]
 					  )
 			);
@@ -2197,7 +2198,7 @@ function handleItemSelected(item, autoAdd = false) {
 		cartStore.addItem(item, 1, false, shiftStore.currentProfile);
 	} catch (error) {
 		uiStore.showError(
-			__("Insufficient Stock"),
+			__("Gagal Menambahkan Item"),
 			error.message,
 			__("Item: {0}", [item.item_code])
 		);
@@ -2250,13 +2251,13 @@ function handleProceedToPayment() {
 	}
 
 	if (cartStore.isEmpty) {
-		showWarning(__("Please add items to cart before proceeding to payment"));
+		showWarning(__("Tambahkan item ke keranjang sebelum lanjut ke pembayaran"));
 		return;
 	}
 
 	const customerValue = cartStore.customer?.name || cartStore.customer;
 	if (!customerValue && !shiftStore.profileCustomer) {
-		showWarning(__("Please select a customer before proceeding"));
+		showWarning(__("Pilih pelanggan sebelum melanjutkan"));
 		uiStore.showCustomerDialog = true;
 		pendingPaymentAfterCustomer.value = true;
 		return;
@@ -2389,7 +2390,7 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 			showSuccess(__("Invoice saved offline and sent to printer"));
 		} catch (printError) {
 			log.warn("Offline print failed:", printError);
-			showWarning(__("Invoice saved offline but print failed"));
+			showWarning(__("Invoice tersimpan offline, tapi gagal dicetak"));
 
 			// Record this in the ERP Error Log so support can see WHY printing
 			// failed at a given outlet (driver issue, printer offline, wrong
@@ -2431,9 +2432,18 @@ async function handlePaymentCompleted(paymentData) {
 	try {
 		const customerValue = cartStore.customer?.name || cartStore.customer;
 		if (!customerValue && !shiftStore.profileCustomer) {
-			showWarning(__("Please select a customer before proceeding"));
+			showWarning(__("Pilih pelanggan sebelum melanjutkan"));
 			uiStore.showPaymentDialog = false;
 			uiStore.showCustomerDialog = true;
+			return;
+		}
+
+		// Block checkout before the sale is queued — a nameless row is only
+		// rejected later by ERPNext at sync time, after the customer has left.
+		const itemsWithoutName = findItemsWithoutName(cartStore.invoiceItems);
+		if (itemsWithoutName.length > 0) {
+			showError(formatItemsWithoutNameError(itemsWithoutName));
+			uiStore.showPaymentDialog = false;
 			return;
 		}
 
@@ -2499,8 +2509,8 @@ async function handlePaymentCompleted(paymentData) {
 
 		uiStore.showPaymentDialog = false;
 		uiStore.showError(
-			errorContext.title || __("Error"),
-			errorContext.message || __("An unexpected error occurred"),
+			errorContext.title || __("Kesalahan"),
+			errorContext.message || __("Terjadi kesalahan yang tidak terduga"),
 			errorContext.technicalDetails || null,
 			errorContext.retryable ? "payment" : null
 		);
@@ -2545,7 +2555,7 @@ async function handleOptionSelected(option) {
 				const actualQty = Math.floor(variant.actual_qty ?? 0);
 				if (actualQty <= 0) {
 					showError(
-						__('"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.', [variant.item_name])
+						__('"{0}" tidak bisa dimasukkan ke keranjang. Stok item habis dan stok minus tidak diizinkan.', [variant.item_name])
 					);
 					return;
 				}
@@ -2576,38 +2586,44 @@ async function handleOptionSelected(option) {
 				}
 			}
 		} else if (option.type === "uom") {
+			// Snapshot before the await below: a double-tap on a UOM option runs this
+			// twice, and by the time the second call resumes the first has already
+			// added the item and cleared pendingItem — spreading the cleared value
+			// produced a row with only uom/rate (no item_code/item_name).
+			const pendingItem = cartStore.pendingItem;
 			const qty = option.quantity || cartStore.pendingItemQty;
-			let rate = cartStore.pendingItem.rate || 0;
-			let price_list_rate = cartStore.pendingItem.price_list_rate || 0;
+			let rate = pendingItem.rate || 0;
+			let price_list_rate = pendingItem.price_list_rate || 0;
 
 			if (offlineStore.isOffline) {
 				// Use cached UOM prices when offline
-				if (cartStore.pendingItem.uom_prices && option.uom in cartStore.pendingItem.uom_prices) {
-					rate = cartStore.pendingItem.uom_prices[option.uom];
+				if (pendingItem.uom_prices && option.uom in pendingItem.uom_prices) {
+					rate = pendingItem.uom_prices[option.uom];
 					price_list_rate = rate;
-				} else if (cartStore.pendingItem.stock_uom && cartStore.pendingItem.uom_prices && cartStore.pendingItem.stock_uom in cartStore.pendingItem.uom_prices) {
-					const basePrice = cartStore.pendingItem.uom_prices[cartStore.pendingItem.stock_uom];
+				} else if (pendingItem.stock_uom && pendingItem.uom_prices && pendingItem.stock_uom in pendingItem.uom_prices) {
+					const basePrice = pendingItem.uom_prices[pendingItem.stock_uom];
 					rate = basePrice * option.conversion_factor;
 					price_list_rate = rate;
 				} else {
-					rate = (cartStore.pendingItem.rate || 0) * option.conversion_factor;
-					price_list_rate = (cartStore.pendingItem.price_list_rate || 0) * option.conversion_factor;
+					rate = (pendingItem.rate || 0) * option.conversion_factor;
+					price_list_rate = (pendingItem.price_list_rate || 0) * option.conversion_factor;
 				}
 			} else {
 				// Make API call when online
 				const itemDetails = await cartStore.getItemDetailsResource.submit({
-					item_code: cartStore.pendingItem.item_code,
+					item_code: pendingItem.item_code,
 					pos_profile: cartStore.posProfile,
 					customer: cartStore.customer?.name || cartStore.customer,
 					qty: qty,
 					uom: option.uom,
 				});
+				if (cartStore.pendingItem !== pendingItem) return;
 				rate = itemDetails.price_list_rate || itemDetails.rate || option.rate || 0;
 				price_list_rate = itemDetails.price_list_rate || option.rate || 0;
 			}
 
 			const itemToAdd = {
-				...cartStore.pendingItem,
+				...pendingItem,
 				uom: option.uom,
 				conversion_factor: option.conversion_factor,
 				rate: rate,
@@ -2631,7 +2647,7 @@ async function handleOptionSelected(option) {
 		}
 	} catch (error) {
 		log.error("Error handling option selection:", error);
-		showError(__("Failed to process selection. Please try again."));
+		showError(__("Gagal memproses pilihan. Silakan coba lagi."));
 	}
 }
 
@@ -2661,7 +2677,12 @@ function logoutWithCloseShift() {
 
 async function handleSaveDraft() {
 	if (cartStore.invoiceItems.length === 0) {
-		showWarning(__("Cannot save an empty cart as draft"));
+		showWarning(__("Keranjang kosong tidak bisa disimpan sebagai draft"));
+		return;
+	}
+	const itemsWithoutName = findItemsWithoutName(cartStore.invoiceItems);
+	if (itemsWithoutName.length > 0) {
+		showError(formatItemsWithoutNameError(itemsWithoutName));
 		return;
 	}
 
@@ -2711,7 +2732,7 @@ async function handleSaveDraft() {
 			} catch (err) {
 				const serverError = err.messages ? err.messages.join(", ") : err.message || err;
 				log.error("Error creating draft online, falling back to local. Server details:", serverError);
-				showError(__("Server Rejected Draft: {0}", [serverError]));
+				showError(__("Server menolak draft: {0}", [serverError]));
 			}
 		} 
 
@@ -2738,7 +2759,7 @@ async function handleSaveDraft() {
 		}
 	} catch (error) {
 		log.error("Error saving draft:", error);
-		showError(__("Failed to save draft invoice."));
+		showError(__("Gagal menyimpan draft invoice."));
 	}
 }
 
@@ -2746,6 +2767,11 @@ async function handleLoadDraft(draft) {
 	try {
 		// If current cart has items, save it as draft before loading new one
 		if (!cartStore.isEmpty) {
+			const itemsWithoutName = findItemsWithoutName(cartStore.invoiceItems);
+			if (itemsWithoutName.length > 0) {
+				showError(formatItemsWithoutNameError(itemsWithoutName));
+				return;
+			}
 			let saved = false;
 			if (!offlineStore.isOffline) {
 				try {
@@ -2804,7 +2830,7 @@ async function handleLoadDraft(draft) {
 			if (!saved) {
 				showError(
 					__(
-						"Failed to save current cart. Draft loading cancelled to prevent data loss."
+						"Gagal menyimpan keranjang saat ini. Membuka draft dibatalkan agar data tidak hilang."
 					)
 				);
 				return;
@@ -3036,7 +3062,7 @@ async function confirmClearCache() {
 
 			showSuccess(__("All cached data has been cleared successfully"));
 		} else {
-			throw new Error("Failed to clear cache completely");
+			throw new Error("Gagal menghapus cache sepenuhnya");
 		}
 	} catch (error) {
 		log.error("Error clearing cache:", error);
@@ -3047,7 +3073,7 @@ async function confirmClearCache() {
 			clearCacheOverlayRef.value.reset();
 		}
 
-		showError(__("Failed to clear cache. Please try again."));
+		showError(__("Gagal menghapus cache. Silakan coba lagi."));
 	}
 }
 
@@ -3079,7 +3105,20 @@ async function handleEditOfflineInvoice(invoice) {
 		}
 
 		if (invoiceData.items && invoiceData.items.length > 0) {
-			for (const item of invoiceData.items) {
+			// Rows without item_code/item_name can't be re-added (addItem rejects
+			// them) and are what made the invoice fail to sync — load the rest
+			// and tell the cashier which rows to re-enter.
+			const itemsWithoutName = findItemsWithoutName(invoiceData.items);
+			const skippedRows = new Set(itemsWithoutName.map((m) => m.row));
+			if (itemsWithoutName.length > 0) {
+				showWarning(
+					__("Baris {0} tidak punya nama item, jadi tidak dimuat ke keranjang. Tambahkan ulang item tersebut sebelum bayar.", [
+						itemsWithoutName.map((m) => `#${m.row}`).join(", "),
+					])
+				);
+			}
+			for (const [index, item] of invoiceData.items.entries()) {
+				if (skippedRows.has(index + 1)) continue;
 				// Use autoAdd=true to skip stock validation when loading saved invoices
 				// Check both quantity and qty fields since items are stored with 'quantity'
 				cartStore.addItem(
@@ -3142,7 +3181,7 @@ async function handleSyncClick() {
 
 async function handleSyncAll() {
 	if (offlineStore.isOffline) {
-		showWarning(__("Cannot sync while offline"));
+		showWarning(__("Tidak bisa sync saat offline"));
 		return;
 	}
 
@@ -3161,15 +3200,15 @@ async function handleSyncAll() {
 			uiStore.showError(
 				errorContext.title,
 				__(
-					"Failed to sync invoice for {0}\n\n${1}\n\nYou can delete this invoice from the offline queue if you don't need it.",
+					"Gagal sync invoice untuk {0}\n\n{1}\n\nInvoice ini bisa dihapus dari antrian offline kalau memang tidak diperlukan.",
 					[firstError.customer, errorContext.message]
 				),
-				errorContext.technicalDetails || __("Invoice ID: {0}", [firstError.invoiceId]),
+				errorContext.technicalDetails || __("ID Invoice: {0}", [firstError.invoiceId]),
 				"sync",
 				{ failedInvoiceId: firstError.invoiceId }
 			);
 		} else if (result.failed > 0) {
-			showWarning(__("{0} invoice(s) failed to sync", [result.failed]));
+			showWarning(__("{0} invoice gagal sync", [result.failed]));
 		}
 	} catch (error) {
 		log.error("Sync error:", error);
@@ -3488,7 +3527,7 @@ async function handleWarehouseChanged(newWarehouse) {
 		showSuccess(__("Switched to {0}. Stock quantities refreshed.", [newWarehouse]));
 	} catch (error) {
 		log.error("Error handling warehouse change:", error);
-		showWarning(__("Warehouse updated but failed to reload stock. Please refresh manually."));
+		showWarning(__("Gudang berhasil diubah, tapi stok gagal dimuat ulang. Silakan refresh manual."));
 	}
 }
 

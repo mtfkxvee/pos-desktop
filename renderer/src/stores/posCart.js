@@ -3,6 +3,7 @@ import { usePOSOffersStore } from "@/stores/posOffers"
 import { usePOSSettingsStore } from "@/stores/posSettings"
 import { parseError } from "@/utils/errorHandler"
 import { roundCurrency } from "@/utils/currency"
+import { findItemsWithoutName, formatItemsWithoutNameError } from "@/utils/invoice"
 import {
 	checkStockAvailability,
 	formatStockError,
@@ -261,6 +262,14 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	function addItem(item, qty = 1, autoAdd = false, currentProfile = null) {
+		// Never let a row without item_code/item_name into the cart — ERPNext
+		// rejects the whole invoice at sync time ("Value missing for: Item Name").
+		if (findItemsWithoutName([item]).length > 0) {
+			throw new Error(
+				__("Item {0} tidak punya nama, jadi tidak bisa dimasukkan ke keranjang. Pilih ulang itemnya.", [item?.item_code || ""]),
+			)
+		}
+
 		// Check stock availability before adding to cart
 		// Skip validation for batch/serial items - they have their own validation in the dialog
 		// Check for stock items AND Product Bundles (bundles now have calculated stock)
@@ -297,15 +306,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				})
 
 				if (!stockCheck.available) {
-					const itemType = item.is_bundle ? "Bundle" : "Item"
-					const errorMsg = formatStockError(
-						item.item_name,
-						qty,
-						stockCheck.actualQty,
-						warehouse,
+					throw new Error(
+						formatStockError(item.item_name, qty, stockCheck.actualQty, warehouse),
 					)
-
-					throw new Error(errorMsg.replace("Item", itemType))
 				}
 			}
 		}
@@ -397,11 +400,16 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 	async function submitInvoice() {
 		if (invoiceItems.value.length === 0) {
-			showWarning(__("Cart is empty"))
+			showWarning(__("Keranjang kosong"))
 			return
 		}
 		if (!customer.value) {
-			showWarning(__("Please select a customer"))
+			showWarning(__("Pilih pelanggan"))
+			return
+		}
+		const itemsWithoutName = findItemsWithoutName(invoiceItems.value)
+		if (itemsWithoutName.length > 0) {
+			showError(formatItemsWithoutNameError(itemsWithoutName))
 			return
 		}
 
@@ -695,21 +703,32 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			const freeQty = Number.parseFloat(freeItem.qty) || 0
 			if (freeQty <= 0) continue
 
-			// Find matching cart item by item_code and uom (that is NOT a free item line)
-			const cartItem = invoiceItems.value.find(
-				(item) =>
-					!item.is_free_item &&
-					item.item_code === freeItem.item_code &&
-					(item.uom || item.stock_uom) === (freeItem.uom || freeItem.stock_uom),
+			// Find matching cart item by item_code and uom (that is NOT a free item line).
+			// A free item returned without a uom matches on item_code alone — otherwise
+			// it became a second, separate row of the same item.
+			const freeUom = freeItem.uom || freeItem.stock_uom
+			const sameCodeItems = invoiceItems.value.filter(
+				(item) => !item.is_free_item && item.item_code === freeItem.item_code,
+			)
+			const cartItem = sameCodeItems.find(
+				(item) => !freeUom || (item.uom || item.stock_uom) === freeUom,
 			)
 
 			if (cartItem) {
 				// Same-item BOGO: just increment free_qty badge
 				cartItem.free_qty = (cartItem.free_qty || 0) + freeQty
 			} else {
-				// Different-item BOGO (or item not in cart): add to cart as a free item line
+				// Different-item BOGO (or item not in cart): add to cart as a free item line.
+				// The backend doesn't always send item_name for free items; borrow it
+				// from a cart row of the same item so the line can be submitted.
+				const itemName = freeItem.item_name || sameCodeItems[0]?.item_name
+				if (!freeItem.item_code || !itemName) {
+					console.warn("Skipping free item without item_code/item_name", freeItem)
+					continue
+				}
 				const newFreeItem = {
 					...freeItem,
+					item_name: itemName,
 					is_free_item: true,
 					quantity: freeQty,
 					rate: 0,
@@ -799,7 +818,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		}
 
 		if (!posProfile.value || invoiceItems.value.length === 0) {
-			showWarning(__("Add items to the cart before applying an offer."))
+			showWarning(__("Tambahkan item ke keranjang sebelum memakai promo."))
 			offersDialogRef?.resetApplyingState()
 			return false
 		}
@@ -879,7 +898,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 					}
 
 					showWarning(
-						__("Your cart doesn't meet the requirements for this offer."),
+						__("Keranjang belum memenuhi syarat promo ini."),
 					)
 					offersDialogRef?.resetApplyingState()
 					result = false
@@ -928,11 +947,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				try {
 					result = applyOfferOffline(offer)
 					if (!result) {
-						showError(__("Failed to apply offer. Please try again."))
+						showError(__("Gagal memakai promo. Silakan coba lagi."))
 					}
 				} catch (fallbackError) {
 					console.error("Offline fallback for applyOffer also failed:", fallbackError)
-					showError(__("Failed to apply offer. Please try again."))
+					showError(__("Gagal memakai promo. Silakan coba lagi."))
 					result = false
 				}
 				offersDialogRef?.resetApplyingState()
@@ -1029,7 +1048,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				if (signal?.aborted) return
 				console.error("Error removing offer:", error)
 				offerProcessingState.value.error = error.message
-				showError(__("Failed to update cart after removing offer."))
+				showError(__("Gagal memperbarui keranjang setelah promo dihapus."))
 				offersDialogRef?.resetApplyingState()
 				result = false
 			} finally {
@@ -1158,7 +1177,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				// Show warning about removed offers
 				const offerNames = invalidOffers.map((o) => o.name).join(", ")
 				showWarning(
-					__("Offer removed: {0}. Cart no longer meets requirements.", [
+					__("Promo dihapus: {0}. Keranjang sudah tidak memenuhi syarat.", [
 						offerNames,
 					]),
 				)
@@ -1405,7 +1424,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		const eligibleItems = resolveEligibleItemsForOffer(offer)
 
 		if (eligibleItems.length === 0) {
-			showWarning(__("Your cart doesn't meet the requirements for this offer."))
+			showWarning(__("Keranjang belum memenuhi syarat promo ini."))
 			return false
 		}
 
@@ -1414,7 +1433,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			: applyOfflinePriceDiscount(offer, eligibleItems)
 
 		if (!applied) {
-			showWarning(__("Your cart doesn't meet the requirements for this offer."))
+			showWarning(__("Keranjang belum memenuhi syarat promo ini."))
 			return false
 		}
 
@@ -1573,7 +1592,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		const offerNames = invalidOffers.map((o) => o.name || o.code).join(", ")
 		showWarning(
-			__("Offer removed: {0}. Cart no longer meets requirements.", [offerNames]),
+			__("Promo dihapus: {0}. Keranjang sudah tidak memenuhi syarat.", [offerNames]),
 		)
 
 		return true
@@ -1918,7 +1937,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			showSuccess(__("Unit changed to {0}", [newUom]))
 		} catch (error) {
 			console.error("Error changing UOM:", error)
-			showError(__("Failed to update UOM. Please try again."))
+			showError(__("Gagal mengubah satuan. Silakan coba lagi."))
 		}
 	}
 
@@ -1932,7 +1951,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		try {
 			const cartItem = findCartItem(itemCode, currentUom)
 			if (!cartItem) {
-				throw new Error("Item not found in cart")
+				throw new Error("Item tidak ditemukan di keranjang")
 			}
 
 			// Handle UOM change with potential merge
@@ -1979,7 +1998,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			return true
 		} catch (error) {
 			console.error("Error updating item:", error)
-			showError(parseError(error) || __("Failed to update item."))
+			showError(parseError(error) || __("Gagal memperbarui item."))
 			return false
 		}
 	}

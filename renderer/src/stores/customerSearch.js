@@ -390,7 +390,7 @@ export const useCustomerSearchStore = defineStore("customerSearch", () => {
 
 	async function searchOnlineCustomers(searchTerm, posProfile, limit = 20) {
 		if (isOffline()) {
-			throw new Error("Cannot search online customers in offline mode")
+			throw new Error("Tidak bisa mencari pelanggan online saat offline")
 		}
 
 		try {

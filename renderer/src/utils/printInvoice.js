@@ -42,7 +42,7 @@ async function sendToPrinter(path, body) {
  */
 export async function printInvoice(invoiceData, printFormat = null, letterhead = null, paperSize = null) {
   if (!invoiceData || !invoiceData.name) {
-    throw new Error("Invalid invoice data")
+    throw new Error("Data invoice tidak valid")
   }
   try {
     // Company address is fetched server-side from the cache pulled by
@@ -70,7 +70,7 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
     const invoiceDoc = await call("pos_next.api.invoices.get_invoice", {
       invoice_name: invoiceName,
     })
-    if (!invoiceDoc) throw new Error("Invoice not found")
+    if (!invoiceDoc) throw new Error("Invoice tidak ditemukan")
 
     if (invoiceDoc.loyalty_program) {
       try {

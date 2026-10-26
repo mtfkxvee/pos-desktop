@@ -120,7 +120,7 @@
 									<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
 										<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
 									</svg>
-									{{ __('Sales person is required') }}
+									{{ __('Sales wajib diisi') }}
 								</div>
 							</div>
 						</template>
@@ -196,7 +196,7 @@
 								<svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
 									<path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7 4a1 1 0 11-2 0 1 1 0 012 0zm-1-9a1 1 0 00-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z" clip-rule="evenodd"/>
 								</svg>
-								{{ __('Sales person is required') }}
+								{{ __('Sales wajib diisi') }}
 							</div>
 
 							<!-- Selected Sales Persons (chips) -->
@@ -676,7 +676,7 @@
 									<path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
 								</svg>
 								<span :class="['text-xs font-medium', !isExactAmountValid ? 'text-red-700' : 'text-green-700']">
-									{{ !isExactAmountValid ? __('Total must equal invoice amount') : __('Payment amount is correct') }}
+									{{ !isExactAmountValid ? __('Total harus sama dengan nilai invoice') : __('Payment amount is correct') }}
 								</span>
 							</div>
 						</div>
@@ -2355,7 +2355,7 @@ function quickAddPayment(method) {
 
 		if (maxAllowed <= 0) {
 			showWarning(
-				__("Cannot add more non-cash payments. Use cash for overpayment."),
+				__("Tidak bisa menambah pembayaran non-tunai lagi. Gunakan tunai untuk kelebihan bayar."),
 			)
 			return
 		}
@@ -2427,7 +2427,7 @@ function addCustomPayment(method, amount) {
 
 		if (maxAllowed <= 0) {
 			showWarning(
-				__("Cannot add more non-cash payments. Use cash for overpayment."),
+				__("Tidak bisa menambah pembayaran non-tunai lagi. Gunakan tunai untuk kelebihan bayar."),
 			)
 			return
 		}
@@ -2436,7 +2436,7 @@ function addCustomPayment(method, amount) {
 			// In exact amount mode, non-cash must equal exactly the remaining balance
 			if (roundCurrency(amt) !== maxAllowed) {
 				showWarning(
-					__("Non-cash payment must equal {0} exactly", [
+					__("Pembayaran non-tunai harus tepat {0}", [
 						formatCurrency(maxAllowed),
 					]),
 				)
@@ -2445,7 +2445,7 @@ function addCustomPayment(method, amount) {
 		} else if (roundCurrency(amt) > maxAllowed) {
 			// Outside exact mode, non-cash still cannot cause overpayment/change
 			showWarning(
-				__("Non-cash payment cannot exceed remaining amount ({0})", [
+				__("Pembayaran non-tunai tidak boleh melebihi sisa tagihan ({0})", [
 					formatCurrency(maxAllowed),
 				]),
 			)
@@ -2464,7 +2464,7 @@ function addCustomPayment(method, amount) {
 		const newTotal = totalPaid.value + amt
 		if (newTotal > roundCurrency(props.grandTotal)) {
 			showWarning(
-				__("Mixed payment cannot exceed invoice total. Limit: {0}", [
+				__("Pembayaran campuran tidak boleh melebihi total invoice. Batas: {0}", [
 					formatCurrency(roundCurrency(props.grandTotal) - totalPaid.value),
 				]),
 			)
@@ -2667,7 +2667,7 @@ function handleAdditionalDiscountChange() {
 			discountValue = settingsStore.maxDiscountAllowed
 			// Show warning toast
 			showWarning(
-				__("Maximum allowed discount is {0}%", [
+				__("Diskon maksimal yang diizinkan {0}%", [
 					settingsStore.maxDiscountAllowed,
 				]),
 			)
@@ -2695,7 +2695,7 @@ function handleAdditionalDiscountChange() {
 				discountAmount = maxAmount
 				// Show warning toast
 				showWarning(
-					__("Maximum allowed discount is {0}% ({1} {2})", [
+					__("Diskon maksimal yang diizinkan {0}% ({1} {2})", [
 						settingsStore.maxDiscountAllowed,
 						props.currency,
 						maxAmount.toFixed(2),

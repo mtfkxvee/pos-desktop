@@ -1600,7 +1600,7 @@ export const useItemSearchStore = defineStore("itemSearch", () => {
 		try {
 			if (!posProfile.value) {
 				log.error("No POS Profile set in store")
-				throw new Error("POS Profile not set")
+				throw new Error("POS Profile belum diatur")
 			}
 
 			log.debug("Calling searchByBarcode API", { posProfile: posProfile.value })

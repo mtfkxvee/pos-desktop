@@ -241,7 +241,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		if (offer?.min_qty && eligibleItemQty < offer.min_qty) {
 			return {
 				eligible: false,
-				reason: __("At least {0} eligible items required", [offer.min_qty]),
+				reason: __("Minimal {0} item yang memenuhi syarat", [offer.min_qty]),
 			}
 		}
 
@@ -259,7 +259,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		if (offer?.min_amt && subtotal < offer.min_amt) {
 			return {
 				eligible: false,
-				reason: __("Minimum cart value of {0} required", [offer.min_amt]),
+				reason: __("Minimal nilai keranjang {0}", [offer.min_amt]),
 			}
 		}
 
@@ -267,7 +267,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		if (offer?.max_amt && subtotal > offer.max_amt) {
 			return {
 				eligible: false,
-				reason: __("Maximum cart value exceeded ({0})", [offer.max_amt]),
+				reason: __("Nilai keranjang melebihi batas maksimal ({0})", [offer.max_amt]),
 			}
 		}
 

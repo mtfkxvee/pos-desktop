@@ -99,7 +99,7 @@
 										v-if="isPermanentlyFailed(invoice)"
 										class="text-[10px] sm:text-xs px-2 py-0.5 sm:py-1 bg-red-100 text-red-700 rounded-full flex-shrink-0 font-semibold"
 									>
-										{{ __('Failed — needs attention') }}
+										{{ __('Gagal — perlu dicek') }}
 									</span>
 									<span
 										v-else-if="invoice.retry_count > 0"
@@ -121,7 +121,7 @@
 									v-if="isPermanentlyFailed(invoice) && invoice.error"
 									class="mt-1 text-xs text-red-600 break-words"
 								>
-									{{ invoice.error }}
+									{{ translateServerMessage(invoice.error) }}
 								</p>
 								<div class="mt-2 flex flex-col gap-1 text-xs sm:text-sm text-gray-600">
 									<div class="flex flex-wrap items-center gap-x-3 gap-y-1">
@@ -208,8 +208,8 @@
 									disabled
 									class="p-1.5 sm:p-2 rounded-lg cursor-not-allowed touch-manipulation"
 									:title="isOffline
-										? __('Cannot delete while offline')
-										: __('Cannot delete a transaction that has not failed to sync')"
+										? __('Tidak bisa menghapus saat offline')
+										: __('Hanya transaksi yang gagal sync yang bisa dihapus')"
 								>
 									<svg class="w-4 h-4 sm:w-5 sm:h-5 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
@@ -257,7 +257,7 @@
 									v-if="isCustomerPermanentlyFailed(entry) && entry.error"
 									class="mt-1 text-xs text-red-600 break-words"
 								>
-									{{ entry.error }}
+									{{ translateServerMessage(entry.error) }}
 								</p>
 								<p class="mt-1 text-xs text-gray-500">
 									{{ entry.data.custom_kode_pelanggan }}
@@ -298,8 +298,8 @@
 		<template #body-content>
 			<div v-if="selectedInvoice" class="flex flex-col gap-3 sm:flex flex-col gap-4">
 				<div v-if="isPermanentlyFailed(selectedInvoice) && selectedInvoice.error" class="bg-red-50 border border-red-200 p-3 sm:p-4 rounded-lg">
-					<h4 class="font-semibold text-red-900 mb-2 text-sm sm:text-base">{{ __('Sync Error') }}</h4>
-					<p class="text-xs sm:text-sm text-red-700 break-words">{{ selectedInvoice.error }}</p>
+					<h4 class="font-semibold text-red-900 mb-2 text-sm sm:text-base">{{ __('Sync Gagal') }}</h4>
+					<p class="text-xs sm:text-sm text-red-700 break-words">{{ translateServerMessage(selectedInvoice.error) }}</p>
 				</div>
 				<div class="bg-gray-50 p-3 sm:p-4 rounded-lg">
 					<h4 class="font-semibold text-gray-900 mb-2 text-sm sm:text-base">{{ __('Customer') }}</h4>
@@ -411,6 +411,7 @@ import {
 	exportBackupToFile,
 	importBackupFromFile,
 } from "@/utils/offline/backup"
+import { translateServerMessage } from "@/utils/errorHandler"
 import { db } from "@/utils/offline/db"
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { Button, Dialog } from "frappe-ui"
@@ -675,7 +676,7 @@ async function handleImportFile(event) {
 			emit("refresh")
 		}
 	} catch (err) {
-		importResult.value = { error: err.message || __("Failed to read backup file") }
+		importResult.value = { error: err.message || __("Gagal membaca file backup") }
 	}
 }
 </script>

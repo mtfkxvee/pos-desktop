@@ -83,7 +83,7 @@ export async function updateDraft(draftId, invoiceData) {
 			// Get existing draft
 			const existingDraft = await getDraftById(draftId)
 			if (!existingDraft) {
-				return reject(new Error("Draft not found"))
+				return reject(new Error("Draft tidak ditemukan"))
 			}
 
 			const sanitizedInvoiceData = sanitizeDraftData(invoiceData) || {}
@@ -148,7 +148,7 @@ export async function deleteDraft(draftId) {
 		try {
 			const draft = await getDraftById(draftId)
 			if (!draft) {
-				return reject(new Error("Draft not found"))
+				return reject(new Error("Draft tidak ditemukan"))
 			}
 
 			const transaction = database.transaction([STORE_NAME], "readwrite")

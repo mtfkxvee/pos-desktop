@@ -190,7 +190,7 @@
 															@click="removeSerial(serial)"
 															:disabled="localSerials.length <= 1"
 															class="p-1 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-															:title="localSerials.length <= 1 ? __('Cannot remove last serial') : __('Remove serial')"
+															:title="localSerials.length <= 1 ? __('Serial terakhir tidak bisa dihapus') : __('Remove serial')"
 														>
 															<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
 																<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
@@ -516,7 +516,7 @@ async function handleWarehouseChange() {
 			hasStock.value = false
 			showError(
 				__(
-					'"{0}" is not available in warehouse "{1}". Please select another warehouse.',
+					'"{0}" tidak tersedia di gudang "{1}". Silakan pilih gudang lain.',
 					[localItem.value.item_name, localWarehouse.value],
 				),
 			)
@@ -524,7 +524,7 @@ async function handleWarehouseChange() {
 			hasStock.value = false
 			showWarning(
 				__(
-					'Only {0} units of "{1}" available in "{2}". Current quantity: {3}',
+					'Stok "{1}" di "{2}" hanya tersisa {0}. Jumlah saat ini: {3}',
 					[
 						availableStock,
 						localItem.value.item_name,

@@ -265,7 +265,7 @@ async function loadEntries(reset = false) {
 		entries.value = reset ? rows : [...entries.value, ...rows]
 		hasMore.value = rows.length === PAGE_SIZE
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to load online orders.")))
+		showError(friendlyError(e, __("Gagal memuat pesanan online.")))
 	} finally {
 		loading.value = false
 	}
@@ -287,7 +287,7 @@ async function openDetail(name) {
 		})
 		lastDeliveryRequest.value = selectedOrder.value?.delivery_request || null
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to load order details.")))
+		showError(friendlyError(e, __("Gagal memuat detail pesanan.")))
 		view.value = "list"
 	} finally {
 		detailLoading.value = false
@@ -311,7 +311,7 @@ async function handlePrepare() {
 		showSuccess(__("Sales Invoice {0} berhasil dibuat", [result.sales_invoice]))
 		await refreshDetail()
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to prepare invoice.")))
+		showError(friendlyError(e, __("Gagal menyiapkan invoice.")))
 	} finally {
 		preparing.value = false
 	}
@@ -329,7 +329,7 @@ async function handleSend() {
 		lastDeliveryRequest.value = result.delivery_request
 		showSuccess(__("Delivery Request {0} berhasil dibuat", [result.delivery_request]))
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to create delivery request.")))
+		showError(friendlyError(e, __("Gagal membuat permintaan pengiriman.")))
 	} finally {
 		sending.value = false
 	}

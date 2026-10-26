@@ -105,7 +105,7 @@ async function verify() {
 		emit("authorized")
 		emit("update:modelValue", false)
 	} else {
-		error.value = __("Incorrect password. Please try again.")
+		error.value = __("Password salah. Silakan coba lagi.")
 		password.value = ""
 		await nextTick()
 		inputRef.value?.focus()

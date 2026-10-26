@@ -446,7 +446,7 @@
 							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
 						</svg>
 						<p class="mt-4 text-sm text-gray-700 font-medium">{{ __('No stock available') }}</p>
-						<p class="mt-1 text-sm text-gray-500">{{ __('This item is out of stock in all warehouses') }}</p>
+						<p class="mt-1 text-sm text-gray-500">{{ __('Item ini habis di semua gudang') }}</p>
 					</div>
 				</div>
 			</div>
@@ -906,7 +906,7 @@ async function loadVariants() {
 		}
 	} catch (err) {
 		console.error("Error loading variants:", err)
-		error.value = err.message || __("Failed to load variants")
+		error.value = err.message || __("Gagal memuat varian")
 		showVariantSelection.value = false
 	} finally {
 		loadingVariants.value = false
@@ -930,7 +930,7 @@ function isVariantSelected(variant) {
 
 function confirmVariantSelection() {
 	if (selectedVariants.value.length === 0) {
-		error.value = __("Please select at least one variant")
+		error.value = __("Pilih minimal satu varian")
 		return
 	}
 	showVariantSelection.value = false
@@ -981,7 +981,7 @@ async function loadAvailability() {
 		}
 	} catch (err) {
 		console.error("Error loading warehouse availability:", err)
-		error.value = err.message || __("Failed to load warehouse availability")
+		error.value = err.message || __("Gagal memuat ketersediaan gudang")
 	} finally {
 		loading.value = false
 	}

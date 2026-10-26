@@ -285,7 +285,7 @@ async function loadInvoices() {
 		invoices.value = result || []
 	} catch (error) {
 		console.error("Error loading partial payments:", error)
-		showError(friendlyError(error, __("Failed to load partial payments")))
+		showError(friendlyError(error, __("Gagal memuat pembayaran sebagian")))
 	} finally {
 		loading.value = false
 	}
@@ -351,7 +351,7 @@ async function handlePaymentCompleted(paymentData) {
 		selectedInvoice.value = null
 	} catch (error) {
 		console.error("[PartialPayments] Error adding payment:", error)
-		showError(friendlyError(error, __("Failed to add payment")))
+		showError(friendlyError(error, __("Gagal menambahkan pembayaran")))
 	}
 }
 

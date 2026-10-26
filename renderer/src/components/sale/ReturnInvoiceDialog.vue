@@ -13,7 +13,7 @@
 					<div class="flex-1 min-w-0 text-start">
 						<h4 class="text-sm font-bold text-amber-900">{{ __('Offline Mode') }}</h4>
 						<p class="text-xs text-amber-700 mt-1">
-							{{ __('Return invoices cannot be processed while offline. Please connect to the internet to search for invoices and create returns.') }}
+							{{ __('Retur tidak bisa diproses saat offline. Sambungkan ke internet untuk mencari invoice dan membuat retur.') }}
 						</p>
 					</div>
 				</div>
@@ -33,7 +33,7 @@
 									ref="invoiceSearchInput"
 									v-model="invoiceListFilter"
 									type="text"
-									:placeholder="isOffline ? __('Search unavailable offline') : __('Search by invoice, customer, or mobile...')"
+									:placeholder="isOffline ? __('Pencarian tidak tersedia saat offline') : __('Search by invoice, customer, or mobile...')"
 									:disabled="isOffline"
 									:class="[
 										'w-full ps-10 pe-10 py-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500',
@@ -103,7 +103,7 @@
 							@click="loadInvoicesResource.reload()"
 							:loading="loadInvoicesResource.loading"
 							:disabled="isOffline"
-							:title="isOffline ? __('Refresh unavailable offline') : __('Refresh')"
+							:title="isOffline ? __('Refresh tidak tersedia saat offline') : __('Refresh')"
 						>
 							<FeatherIcon name="refresh-cw" class="w-4 h-4" />
 						</Button>
@@ -682,7 +682,7 @@
 	<!-- Return Period Expired Dialog -->
 	<Dialog
 		v-model="returnExpiredDialog.visible"
-		:options="{ title: __('Return Period Expired'), size: 'md' }"
+		:options="{ title: __('Batas Waktu Retur Sudah Lewat'), size: 'md' }"
 	>
 		<template #body-content>
 			<div class="flex flex-col items-center text-center py-4">
@@ -696,7 +696,7 @@
 
 				<!-- Main Message -->
 				<p class="text-gray-600 mb-4">
-					{{ __('This invoice cannot be returned because the return period has expired.') }}
+					{{ __('Invoice ini tidak bisa diretur karena batas waktu retur sudah lewat.') }}
 				</p>
 
 				<!-- Details Box -->
@@ -717,7 +717,7 @@
 
 				<!-- Help Text -->
 				<p class="text-xs text-gray-500 mt-4">
-					{{ __('Please contact your manager if you need to process this return.') }}
+					{{ __('Hubungi manajer kalau retur ini tetap perlu diproses.') }}
 				</p>
 			</div>
 		</template>
@@ -798,7 +798,7 @@ const originalOutstandingAmount = ref(0)
 // UI state
 const errorDialog = reactive({
 	visible: false,
-	title: __("Validation Error"),
+	title: __("Data Tidak Valid"),
 	message: "",
 })
 const returnModal = reactive({ visible: false })
@@ -827,7 +827,7 @@ const loadInvoicesResource = createResource({
 	},
 	onError(error) {
 		console.error("Error loading invoices:", error)
-		showError(__("Failed to load recent invoices"))
+		showError(__("Gagal memuat invoice terbaru"))
 	},
 })
 
@@ -894,7 +894,7 @@ const fetchInvoiceResource = createResource({
 
 			if (availableItems.length === 0) {
 				showWarning(
-					__("All items from this invoice have already been returned"),
+					__("Semua item di invoice ini sudah diretur"),
 				)
 				originalInvoice.value = null
 				preparedReturnDoc.value = null
@@ -971,7 +971,7 @@ const fetchInvoiceResource = createResource({
 		// Extract and show the actual error message (e.g., return period expired)
 		const errorMsg = extractErrorMessage(
 			error,
-			__("Failed to load invoice details"),
+			__("Gagal memuat detail invoice"),
 		)
 		showError(errorMsg)
 	},
@@ -1306,7 +1306,7 @@ function refundTarget(total = returnTotal.value) {
 // Methods
 function extractErrorMessage(
 	error,
-	fallbackMessage = __("Failed to create return invoice"),
+	fallbackMessage = __("Gagal membuat invoice retur"),
 ) {
 	if (!error) return fallbackMessage
 	if (error.messages?.length) return error.messages.join(", ")
@@ -1332,7 +1332,7 @@ function extractErrorMessage(
 	return fallbackMessage
 }
 
-function openErrorDialog(message, title = __("Validation Error")) {
+function openErrorDialog(message, title = __("Data Tidak Valid")) {
 	Object.assign(errorDialog, { visible: true, title, message })
 }
 
@@ -1430,9 +1430,9 @@ function handleValidityResponse(validity) {
 			visible: true,
 		})
 	} else if (validity.error_type === "not_found") {
-		showError(validity.message || __("Invoice not found"))
+		showError(validity.message || __("Invoice tidak ditemukan"))
 	} else {
-		showError(validity.message || __("Cannot process return for this invoice"))
+		showError(validity.message || __("Retur tidak bisa diproses untuk invoice ini"))
 	}
 	return false
 }
@@ -1472,7 +1472,7 @@ async function checkValidityAndOpenModal(invoiceName, fallbackOnError = false) {
 			// Fallback to direct open if validity check fails
 			openReturnModal({ name: invoiceName })
 		} else {
-			showError(__("Failed to check invoice"))
+			showError(__("Gagal memeriksa invoice"))
 		}
 	}
 }

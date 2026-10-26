@@ -275,7 +275,7 @@ const invoicesResource = createResource({
 	},
 	onError(error) {
 		console.error("Error loading invoices:", error)
-		showError(__("Failed to load invoices"))
+		showError(__("Gagal memuat invoice"))
 		isLoadingMore.value = false
 	},
 })
@@ -346,7 +346,7 @@ async function loadInvoices() {
 			hasMore.value = false
 		} catch (error) {
 			console.error("Error loading offline invoice history:", error)
-			showError(__("Failed to load invoices"))
+			showError(__("Gagal memuat invoice"))
 		} finally {
 			offlineLoading.value = false
 		}

@@ -44,7 +44,7 @@ export function useOffline() {
 	// Sync pending invoices
 	const syncPending = async () => {
 		if (isOffline.value) {
-			throw new Error("Cannot sync while offline")
+			throw new Error("Tidak bisa sync saat offline")
 		}
 
 		isSyncing.value = true

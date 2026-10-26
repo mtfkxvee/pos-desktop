@@ -328,7 +328,7 @@ async function loadEntries(reset = false) {
 		entries.value = reset ? rows : [...entries.value, ...rows]
 		hasMore.value = rows.length === PAGE_SIZE
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to load delivery requests.")))
+		showError(friendlyError(e, __("Gagal memuat permintaan pengiriman.")))
 	} finally {
 		loading.value = false
 	}
@@ -352,7 +352,7 @@ async function openDetail(name) {
 		selectedRequest.value = detail
 		form.value = { ...detail }
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to load delivery request details.")))
+		showError(friendlyError(e, __("Gagal memuat detail permintaan pengiriman.")))
 		view.value = "list"
 	} finally {
 		detailLoading.value = false
@@ -377,7 +377,7 @@ async function handleSave() {
 			entries.value[idx] = { ...entries.value[idx], ...updated }
 		}
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to save delivery request.")))
+		showError(friendlyError(e, __("Gagal menyimpan permintaan pengiriman.")))
 	} finally {
 		saving.value = false
 	}

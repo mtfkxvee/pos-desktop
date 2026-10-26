@@ -555,7 +555,7 @@ const settingsResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		showError(__("Failed to load settings"))
+		showError(__("Gagal memuat pengaturan"))
 	},
 })
 
@@ -643,7 +643,7 @@ async function loadSettings() {
 
 async function saveSettings() {
 	if (!props.posProfile) {
-		showError(__("POS Profile not found"))
+		showError(__("POS Profile tidak ditemukan"))
 		return
 	}
 
@@ -741,7 +741,7 @@ async function saveSettings() {
 		showSuccess(successMessage)
 	} catch (error) {
 		log.error("Error saving settings:", error)
-		showError(error.message || __("Failed to save settings"))
+		showError(error.message || __("Gagal menyimpan pengaturan"))
 	} finally {
 		saving.value = false
 	}

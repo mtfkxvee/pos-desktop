@@ -116,7 +116,7 @@
 											<path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" />
 										</svg>
 										<div class="flex-1">
-											<p class="text-xs font-medium text-amber-900">{{ __('Create permission required') }}</p>
+											<p class="text-xs font-medium text-amber-900">{{ __('Butuh izin untuk membuat data') }}</p>
 										</div>
 									</div>
 								</div>
@@ -937,7 +937,7 @@ const itemGroupsResource = createResource({
 	},
 	onError(error) {
 		console.error("Error loading item groups:", error)
-		handleError(error, __("Failed to load item groups"))
+		handleError(error, __("Gagal memuat grup item"))
 	},
 })
 
@@ -949,7 +949,7 @@ const brandsResource = createResource({
 	},
 	onError(error) {
 		console.error("Error loading brands:", error)
-		handleError(error, __("Failed to load brands"))
+		handleError(error, __("Gagal memuat daftar merek"))
 	},
 })
 
@@ -972,7 +972,7 @@ const savePromotionResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to create promotion"))
+		handleError(error, __("Gagal membuat promo"))
 	},
 })
 
@@ -1007,7 +1007,7 @@ const updatePromotionResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to update promotion"))
+		handleError(error, __("Gagal memperbarui promo"))
 	},
 })
 
@@ -1019,7 +1019,7 @@ const toggleResource = createResource({
 		loadPromotions()
 	},
 	onError(error) {
-		handleError(error, __("Failed to update promotion status"))
+		handleError(error, __("Gagal mengubah status promo"))
 	},
 })
 
@@ -1045,7 +1045,7 @@ const deleteResource = createResource({
 		loading.value = false
 		showDeleteConfirm.value = false
 		promotionToDelete.value = null
-		handleError(error, __("Failed to delete promotion"))
+		handleError(error, __("Gagal menghapus promo"))
 	},
 })
 
@@ -1063,7 +1063,7 @@ const promotionDetailsResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to load promotion details"))
+		handleError(error, __("Gagal memuat detail promo"))
 	},
 })
 
@@ -1136,18 +1136,18 @@ function parseErrorMessage(error) {
 					typeof messages[0] === "string"
 						? JSON.parse(messages[0])
 						: messages[0]
-				return firstMessage.message || error.message || __("An error occurred")
+				return firstMessage.message || error.message || __("Terjadi kesalahan")
 			}
 		}
 		// Fallback to error.message
-		return error.message || __("An error occurred")
+		return error.message || __("Terjadi kesalahan")
 	} catch (e) {
-		return error.message || __("An error occurred")
+		return error.message || __("Terjadi kesalahan")
 	}
 }
 
 // Utility: Show error with proper parsing
-function handleError(error, defaultMessage = __("An error occurred")) {
+function handleError(error, defaultMessage = __("Terjadi kesalahan")) {
 	const errorMessage = parseErrorMessage(error)
 	showError(errorMessage || defaultMessage)
 }
@@ -1216,7 +1216,7 @@ function cancelDelete() {
 function handleSubmit() {
 	// Validate
 	if (!form.value.name) {
-		showWarning(__("Please enter a promotion name"))
+		showWarning(__("Masukkan nama promo"))
 		return
 	}
 
@@ -1227,7 +1227,7 @@ function handleSubmit() {
 		)
 		if (duplicate) {
 			showWarning(
-				__('Promotion "{0}" already exists. Please use a different name.', [
+				__('Promo "{0}" sudah ada. Gunakan nama lain.', [
 					form.value.name,
 				]),
 			)
@@ -1237,7 +1237,7 @@ function handleSubmit() {
 
 	if (form.value.apply_on !== "Transaction" && form.value.items.length === 0) {
 		showWarning(
-			__("Please select at least one {0}", [
+			__("Pilih minimal satu {0}", [
 				translateApplyOn(form.value.apply_on),
 			]),
 		)

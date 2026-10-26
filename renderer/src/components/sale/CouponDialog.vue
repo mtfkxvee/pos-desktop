@@ -262,7 +262,7 @@ function applyGiftCard(card) {
 
 async function applyCoupon() {
 	if (!couponCode.value.trim()) {
-		errorMessage.value = __("Please enter a coupon code")
+		errorMessage.value = __("Masukkan kode kupon")
 		return
 	}
 
@@ -336,7 +336,7 @@ async function applyCoupon() {
 		errorMessage.value = ""
 	} catch (error) {
 		console.error("Error applying coupon:", error)
-		errorMessage.value = __("Failed to apply coupon. Please try again.")
+		errorMessage.value = __("Gagal memakai kupon. Silakan coba lagi.")
 		showError(errorMessage.value)
 	} finally {
 		applying.value = false

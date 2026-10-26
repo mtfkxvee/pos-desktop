@@ -35,7 +35,7 @@ export function useStock() {
 				level: "out",
 				color: "bg-red-500",
 				textColor: "text-white",
-				label: __("Out of Stock"),
+				label: __("Stok Habis"),
 			}
 		}
 

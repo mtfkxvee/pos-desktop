@@ -136,7 +136,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function syncPending() {
 		if (isOffline.value) {
-			throw new Error("Cannot sync while offline")
+			throw new Error("Tidak bisa sync saat offline")
 		}
 
 		manualSyncing.value = true
@@ -231,7 +231,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			showSuccess(__("Offline invoice deleted successfully"))
 		} catch (error) {
 			log.error("Failed to delete offline invoice", error)
-			showError(error.message || __("Failed to delete offline invoice"))
+			showError(error.message || __("Gagal menghapus invoice offline"))
 			throw error
 		}
 	}
@@ -253,7 +253,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			showSuccess(__("Retrying invoice sync..."))
 		} catch (error) {
 			log.error("Failed to retry offline invoice", error)
-			showError(error.message || __("Failed to retry invoice"))
+			showError(error.message || __("Gagal mengulang sync invoice"))
 			throw error
 		}
 	}
@@ -264,7 +264,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	 */
 	async function syncAllPending() {
 		if (isOffline.value) {
-			showWarning(__("Cannot sync while offline"))
+			showWarning(__("Tidak bisa sync saat offline"))
 			return { success: 0, failed: 0, errors: [] }
 		}
 
@@ -407,7 +407,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			}
 		} catch (error) {
 			log.error("Failed to preload offline data", error)
-			showWarning(__("Some data may not be available offline"))
+			showWarning(__("Sebagian data mungkin tidak tersedia saat offline"))
 		} finally {
 			_preloadingProfile = null
 		}
@@ -421,7 +421,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		const cacheReady = await checkCacheReady()
 		if (!cacheReady && isOffline.value) {
 			showWarning(
-				__("POS is offline without cached data. Please connect to sync."),
+				__("POS sedang offline dan belum ada data tersimpan. Sambungkan ke internet untuk sync."),
 			)
 		}
 		return cacheReady

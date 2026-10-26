@@ -695,7 +695,7 @@ const couponsResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to load coupons"))
+		handleError(error, __("Gagal memuat kupon"))
 	},
 })
 
@@ -712,7 +712,7 @@ const couponDetailsResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to load coupon details"))
+		handleError(error, __("Gagal memuat detail kupon"))
 	},
 })
 
@@ -748,7 +748,7 @@ const createCouponResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to create coupon"))
+		handleError(error, __("Gagal membuat kupon"))
 	},
 })
 
@@ -782,7 +782,7 @@ const updateCouponResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to update coupon"))
+		handleError(error, __("Gagal memperbarui kupon"))
 	},
 })
 
@@ -806,7 +806,7 @@ const toggleCouponResource = createResource({
 	},
 	onError(error) {
 		loading.value = false
-		handleError(error, __("Failed to toggle coupon status"))
+		handleError(error, __("Gagal mengubah status kupon"))
 	},
 })
 
@@ -827,7 +827,7 @@ const deleteCouponResource = createResource({
 	onError(error) {
 		loading.value = false
 		showDeleteConfirm.value = false
-		handleError(error, __("Failed to delete coupon"))
+		handleError(error, __("Gagal menghapus kupon"))
 	},
 })
 
@@ -884,11 +884,11 @@ function handleCancel() {
 function handleSubmit() {
 	// Validate
 	if (!form.value.coupon_name) {
-		showWarning(__("Please enter a coupon name"))
+		showWarning(__("Masukkan nama kupon"))
 		return
 	}
 	if (!form.value.discount_type) {
-		showWarning(__("Please select a discount type"))
+		showWarning(__("Pilih jenis diskon"))
 		return
 	}
 	if (form.value.discount_type === "Percentage") {
@@ -897,17 +897,17 @@ function handleSubmit() {
 			form.value.discount_percentage <= 0 ||
 			form.value.discount_percentage > 100
 		) {
-			showWarning(__("Please enter a valid discount percentage (1-100)"))
+			showWarning(__("Masukkan persentase diskon yang valid (1-100)"))
 			return
 		}
 	} else if (form.value.discount_type === "Amount") {
 		if (!form.value.discount_amount || form.value.discount_amount <= 0) {
-			showWarning(__("Please enter a valid discount amount"))
+			showWarning(__("Masukkan nominal diskon yang valid"))
 			return
 		}
 	}
 	if (form.value.coupon_type === "Gift Card" && !form.value.customer) {
-		showWarning(__("Please select a customer for gift card"))
+		showWarning(__("Pilih pelanggan untuk gift card"))
 		return
 	}
 
@@ -928,7 +928,7 @@ function handleToggle() {
 function handleDelete() {
 	if (selectedCoupon.value.used > 0) {
 		showWarning(
-			__("Cannot delete coupon as it has been used {0} times", [
+			__("Kupon tidak bisa dihapus karena sudah dipakai {0} kali", [
 				selectedCoupon.value.used,
 			]),
 		)
@@ -1036,16 +1036,16 @@ function parseErrorMessage(error) {
 					typeof messages[0] === "string"
 						? JSON.parse(messages[0])
 						: messages[0]
-				return firstMessage.message || error.message || __("An error occurred")
+				return firstMessage.message || error.message || __("Terjadi kesalahan")
 			}
 		}
-		return error.message || __("An error occurred")
+		return error.message || __("Terjadi kesalahan")
 	} catch (e) {
-		return error.message || __("An error occurred")
+		return error.message || __("Terjadi kesalahan")
 	}
 }
 
-function handleError(error, defaultMessage = __("An error occurred")) {
+function handleError(error, defaultMessage = __("Terjadi kesalahan")) {
 	const errorMessage = parseErrorMessage(error)
 	showError(errorMessage || defaultMessage)
 }

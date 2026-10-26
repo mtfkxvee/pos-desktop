@@ -949,7 +949,7 @@ export function useInvoice() {
 
 				if (!invoiceDoc || !invoiceDoc.name) {
 					throw new Error(
-						"Failed to create draft invoice - no invoice name returned",
+						"Gagal membuat draft invoice - server tidak mengembalikan nomor invoice",
 					)
 				}
 

@@ -168,7 +168,7 @@
 									</svg>
 									<div class="flex-1 text-start">
 										<p class="text-sm font-medium text-yellow-800">{{ __('You are offline') }}</p>
-										<p class="text-xs text-yellow-700">{{ __('Payments cannot be added while offline. Connect to the internet to add payments.') }}</p>
+										<p class="text-xs text-yellow-700">{{ __('Pembayaran tidak bisa ditambahkan saat offline. Sambungkan ke internet untuk menambah pembayaran.') }}</p>
 									</div>
 								</div>
 
@@ -231,7 +231,7 @@
 												<button
 													@click="selectInvoiceForPayment(invoice)"
 													:disabled="loadingInvoiceDetails || isOffline()"
-													:title="isOffline() ? __('Payments cannot be added while offline') : ''"
+													:title="isOffline() ? __('Pembayaran tidak bisa ditambahkan saat offline') : ''"
 													class="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
 												>
 													<LoadingIndicator v-if="loadingInvoiceDetails" class="w-4 h-4" />
@@ -787,7 +787,7 @@ async function loadHistoryPage(reset = false) {
 		historyOffset.value += rows.length
 		historyHasMore.value = rows.length === PAGE_SIZE
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to load invoice history")))
+		showError(friendlyError(e, __("Gagal memuat riwayat invoice")))
 	} finally {
 		historyInitialLoading.value = false
 		historyLoadingMore.value = false
@@ -818,7 +818,7 @@ const performHistorySearch = debounce(async () => {
 		})
 		historySearchResults.value = result || []
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to search invoices")))
+		showError(friendlyError(e, __("Gagal mencari invoice")))
 		historySearchResults.value = []
 	} finally {
 		historySearching.value = false
@@ -835,7 +835,7 @@ const performUnpaidSearch = debounce(async (term) => {
 		})
 		unpaidSearchResults.value = result || []
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to search unpaid invoices")))
+		showError(friendlyError(e, __("Gagal mencari invoice belum lunas")))
 		unpaidSearchResults.value = []
 	} finally {
 		unpaidSearching.value = false
@@ -1214,7 +1214,7 @@ async function loadUnpaidInvoices() {
 
 		// If we already have cached data, don't show error
 		if (unpaidInvoices.value.length === 0) {
-			showError(friendlyError(error, __("Failed to load unpaid invoices")))
+			showError(friendlyError(error, __("Gagal memuat invoice belum lunas")))
 		}
 	} finally {
 		loading.value = false
@@ -1314,7 +1314,7 @@ async function handlePaymentCompleted(paymentData) {
 		selectedInvoice.value = null
 	} catch (error) {
 		console.error("Error adding payment:", error)
-		showError(friendlyError(error, __("Failed to add payment")))
+		showError(friendlyError(error, __("Gagal menambahkan pembayaran")))
 	}
 }
 

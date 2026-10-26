@@ -65,7 +65,7 @@ export const useBootstrapStore = defineStore("bootstrap", () => {
 				})
 				return result
 			} else {
-				throw new Error("Bootstrap API returned unsuccessful response")
+				throw new Error("Gagal memuat data awal dari server")
 			}
 		} catch (err) {
 			log.error("Failed to load bootstrap data", err)

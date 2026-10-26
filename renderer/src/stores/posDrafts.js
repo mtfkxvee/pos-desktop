@@ -6,6 +6,7 @@ import {
 	updateDraft,
 } from "@/utils/draftManager"
 import { useToast } from "@/composables/useToast"
+import { findItemsWithoutName, formatItemsWithoutNameError } from "@/utils/invoice"
 import { defineStore } from "pinia"
 import { ref } from "vue"
 
@@ -44,7 +45,12 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 		extraData = {},
 	) {
 		if (invoiceItems.length === 0) {
-			showWarning(__("Cannot save an empty cart as draft"))
+			showWarning(__("Keranjang kosong tidak bisa disimpan sebagai draft"))
+			return null
+		}
+		const itemsWithoutName = findItemsWithoutName(invoiceItems)
+		if (itemsWithoutName.length > 0) {
+			showError(formatItemsWithoutNameError(itemsWithoutName))
 			return null
 		}
 
@@ -86,7 +92,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			return savedDraft
 		} catch (error) {
 			console.error("Error saving draft:", error)
-			showError(__("Failed to save draft"))
+			showError(__("Gagal menyimpan draft"))
 			return null
 		}
 	}
@@ -105,7 +111,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			}
 		} catch (error) {
 			console.error("Error loading draft:", error)
-			showError(__("Failed to load draft"))
+			showError(__("Gagal memuat draft"))
 			throw error
 		}
 	}
@@ -117,7 +123,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 			showSuccess(__("Draft deleted successfully"))
 		} catch (error) {
 			console.error("Error deleting draft:", error)
-			showError(__("Failed to delete draft"))
+			showError(__("Gagal menghapus draft"))
 		}
 	}
 

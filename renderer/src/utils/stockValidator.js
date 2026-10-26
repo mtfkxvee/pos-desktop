@@ -70,14 +70,11 @@ export async function getItemStock(itemCode, warehouse) {
  * @returns {string} - Formatted error message
  */
 export function formatStockError(itemName, requested, available, warehouse) {
-	const unit = requested === 1 ? "unit" : "units"
-	const availableUnit = available === 1 ? "unit" : "units"
-
 	if (available === 0) {
-		return `"${itemName}" is out of stock in warehouse "${warehouse}".\n\nPlease check another warehouse or restock this item.`
+		return `Stok "${itemName}" habis di gudang "${warehouse}".\n\nCek gudang lain atau lakukan restock item ini.`
 	}
 
-	return `Not enough stock for "${itemName}".\n\nYou requested ${requested} ${unit}, but only ${available} ${availableUnit} available in "${warehouse}".\n\nPlease reduce the quantity or check another warehouse.`
+	return `Stok "${itemName}" tidak cukup.\n\nDiminta ${requested}, tapi hanya tersedia ${available} di gudang "${warehouse}".\n\nKurangi jumlahnya atau cek gudang lain.`
 }
 
 /**

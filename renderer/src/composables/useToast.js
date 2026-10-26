@@ -56,11 +56,11 @@ export function useToast() {
 	}
 
 	function showError(message) {
-		showToastNotification(__("Error"), message, "error")
+		showToastNotification(__("Kesalahan"), message, "error")
 	}
 
 	function showWarning(message) {
-		showToastNotification(__("Validation Error"), message, "warning")
+		showToastNotification(__("Data Tidak Valid"), message, "warning")
 	}
 
 	function showInfo(message) {

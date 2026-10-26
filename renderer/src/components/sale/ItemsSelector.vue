@@ -1336,11 +1336,11 @@ function selectItem(item, autoAdd = false) {
 		showError(
 			item.is_bundle
 				? __(
-						'"{0}" cannot be added to cart. Bundle is out of stock. Allow Negative Stock is disabled.',
+						'"{0}" tidak bisa dimasukkan ke keranjang. Stok bundle habis dan stok minus tidak diizinkan.',
 						[item.item_name],
 					)
 				: __(
-						'"{0}" cannot be added to cart. Item is out of stock. Allow Negative Stock is disabled.',
+						'"{0}" tidak bisa dimasukkan ke keranjang. Stok item habis dan stok minus tidak diizinkan.',
 						[item.item_name],
 					),
 		)

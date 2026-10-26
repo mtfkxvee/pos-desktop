@@ -144,7 +144,7 @@ async function loadEntries(reset = false) {
 		entries.value = reset ? rows : [...entries.value, ...rows]
 		hasMore.value = rows.length === PAGE_SIZE
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to load delivery notes.")))
+		showError(friendlyError(e, __("Gagal memuat surat jalan.")))
 	} finally {
 		loading.value = false
 	}
@@ -160,7 +160,7 @@ async function handlePrint(name) {
 	try {
 		await printInvoiceByName(name, "POS Next Delivery Note", null, getPaperSize())
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to print delivery note.")))
+		showError(friendlyError(e, __("Gagal mencetak surat jalan.")))
 	} finally {
 		printingName.value = null
 	}

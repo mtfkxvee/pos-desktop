@@ -528,12 +528,12 @@ async function openEditForm(name) {
 
 async function saveEntry(submit) {
 	if (!form.value.credit_account) {
-		showWarning(__("Please select a credit account."))
+		showWarning(__("Pilih akun kredit."))
 		return
 	}
 	const validRows = form.value.expense_rows.filter(r => r.account && r.amount > 0)
 	if (!validRows.length) {
-		showWarning(__("Please add at least one expense row with account and amount."))
+		showWarning(__("Tambahkan minimal satu baris biaya beserta akun dan nominalnya."))
 		return
 	}
 
@@ -552,7 +552,7 @@ async function saveEntry(submit) {
 		goToList()
 		await loadEntries(true)
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to save journal entry.")))
+		showError(friendlyError(e, __("Gagal menyimpan jurnal.")))
 	} finally {
 		submitting.value = false
 	}
@@ -566,7 +566,7 @@ async function confirmCancel(entry) {
 		goToList()
 		await loadEntries(true)
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to cancel.")))
+		showError(friendlyError(e, __("Gagal membatalkan.")))
 	}
 }
 
@@ -578,7 +578,7 @@ async function confirmDelete(entry) {
 		goToList()
 		await loadEntries(true)
 	} catch (e) {
-		showError(friendlyError(e, __("Failed to delete.")))
+		showError(friendlyError(e, __("Gagal menghapus.")))
 	}
 }
 
