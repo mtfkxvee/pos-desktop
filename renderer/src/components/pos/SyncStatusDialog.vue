@@ -196,11 +196,15 @@ import { useToast } from "@/composables/useToast"
 import { useShift } from "@/composables/useShift"
 import { useCustomerSearchStore } from "@/stores/customerSearch"
 import { usePOSShiftStore } from "@/stores/posShift"
+import { usePOSOffersStore } from "@/stores/posOffers"
+import { usePOSCartStore } from "@/stores/posCart"
 
 defineEmits(["close", "open-offline-invoices"])
 const { showSuccess, showError } = useToast()
 const customerSearchStore = useCustomerSearchStore()
 const posShiftStore = usePOSShiftStore()
+const offersStore = usePOSOffersStore()
+const cartStore = usePOSCartStore()
 
 const BASE = "http://127.0.0.1:8871"
 
@@ -264,6 +268,17 @@ async function loadOverview() {
 	}
 }
 
+// Pull the fresh offer list into the in-memory store, then re-evaluate the
+// current cart so a newly added promo applies without re-adding items.
+async function reloadOffers() {
+	try {
+		await offersStore.refreshOffers(posShiftStore.profileName)
+		cartStore.reevaluateOffersAfterSync()
+	} catch (e) {
+		showError(__("Gagal memuat ulang promo: {0}", [e.message]))
+	}
+}
+
 async function handleSyncType(type) {
 	syncingType.value = type
 	try {
@@ -284,6 +299,11 @@ async function handleSyncType(type) {
 			// until the app happens to restart.
 			if (type === "customers") {
 				customerSearchStore.loadAllCustomers(posShiftStore.profileName, true)
+			}
+			// Same problem for promos: the offers store fetches once per
+			// session, so a new Pricing Rule only showed up after a restart.
+			if (type === "offers") {
+				reloadOffers()
 			}
 		}
 		await loadOverview()
@@ -343,6 +363,7 @@ async function handleSyncNow() {
 		} else {
 			showSuccess(__("Sinkronisasi selesai."))
 			customerSearchStore.loadAllCustomers(posShiftStore.profileName, true)
+			reloadOffers()
 		}
 		await loadOverview()
 	} catch (e) {

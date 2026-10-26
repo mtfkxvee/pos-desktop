@@ -402,6 +402,46 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		return fetchPromise
 	}
 
+	/**
+	 * Re-fetch the offer list even though this session already has one.
+	 * ensureOffersFetched() only ever fetches once per session (hasFetched),
+	 * so a Pricing Rule created in ERP after the POS was opened stayed
+	 * invisible until the app restarted — a manual promo sync only refreshed
+	 * the local server cache, never this store. Keeps the old list if the
+	 * refetch fails, so a flaky request can't wipe out working promos.
+	 *
+	 * @param {string} posProfile - POS Profile name to fetch offers for
+	 */
+	async function refreshOffers(posProfile) {
+		if (fetchPromise) await fetchPromise.catch(() => {})
+		const previous = availableOffers.value
+		hasFetched.value = false
+		try {
+			await ensureOffersFetched(posProfile)
+		} catch (error) {
+			setAvailableOffers(previous)
+			throw error
+		}
+	}
+
+	/**
+	 * Swap in the offer list the background sync just pulled into the local
+	 * cache — no extra ERP request, the scheduler already made it.
+	 *
+	 * @param {string} posProfile - POS Profile name to read offers for
+	 * @returns {Promise<boolean>} True if the list actually changed
+	 */
+	async function reloadFromCache(posProfile) {
+		if (!posProfile || fetchPromise) return false
+		const cached = await offlineWorker.getCachedOffers(posProfile)
+		if (!Array.isArray(cached)) return false
+		if (hasFetched.value && JSON.stringify(cached) === JSON.stringify(availableOffers.value)) {
+			return false
+		}
+		setAvailableOffers(cached)
+		return true
+	}
+
 	return {
 		// State
 		availableOffers,
@@ -422,5 +462,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		checkOfferEligibility,
 		getUnlockAmount,
 		ensureOffersFetched,
+		refreshOffers,
+		reloadFromCache,
 	}
 })

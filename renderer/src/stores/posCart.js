@@ -2267,6 +2267,18 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	/**
+	 * Re-evaluate the cart after the offer list itself changed (a sync pulled
+	 * new/edited Pricing Rules). Unlike forceRefreshOffers() this keeps
+	 * suppressOfferReapply, so a promo the cashier removed by hand isn't put
+	 * back just because a background sync ran.
+	 */
+	function reevaluateOffersAfterSync() {
+		if (invoiceItems.value.length === 0) return
+		offerProcessingState.value.lastCartHash = ""
+		triggerOfferProcessing(true)
+	}
+
+	/**
 	 * Calculate dynamic debounce delay based on cart size.
 	 * Small carts (1-3 items): 100ms - fast response
 	 * Medium carts (4-10 items): 200ms - balanced
@@ -2523,5 +2535,6 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			offerQueue.cancel()
 		},
 		forceRefreshOffers, // Force reprocess offers from scratch
+		reevaluateOffersAfterSync,
 	}
 })

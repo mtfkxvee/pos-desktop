@@ -1098,6 +1098,7 @@ import { useLongPress } from "@/composables/useLongPress"
 import { usePaymentNumpad } from "@/composables/usePaymentNumpad"
 import { useResponsivePayment } from "@/composables/useResponsivePayment"
 import { useQuickAmounts } from "@/composables/useQuickAmounts"
+import { useSyncedDataRefresh } from "@/composables/useSyncedDataRefresh"
 
 const log = logger.create("PaymentDialog")
 const settingsStore = usePOSSettingsStore()
@@ -1840,6 +1841,37 @@ async function loadPaymentMethods() {
 		loadingPaymentMethods.value = false
 	}
 }
+
+// Payment methods are otherwise loaded once per session, so a method
+// added/removed in ERP only showed up after a restart. Swap in what the
+// 2-minute background sync pulled — but never while the dialog is open,
+// so the cashier's choices don't shift mid-payment; applied on close instead.
+let pendingPaymentMethods = null
+
+function applyPaymentMethods(methods) {
+	paymentMethods.value = methods
+	const defaultMethod = methods.find((m) => m.default)
+	lastSelectedMethod.value = defaultMethod || methods[0] || null
+}
+
+useSyncedDataRefresh("paymentMethods", async () => {
+	if (!props.posProfile) return
+	const cached = await offlineWorker.getCachedPaymentMethods(props.posProfile)
+	if (!Array.isArray(cached) || cached.length === 0) return
+	if (JSON.stringify(cached) === JSON.stringify(paymentMethods.value)) return
+	if (show.value) {
+		pendingPaymentMethods = cached
+	} else {
+		applyPaymentMethods(cached)
+	}
+})
+
+watch(show, (isOpen) => {
+	if (!isOpen && pendingPaymentMethods) {
+		applyPaymentMethods(pendingPaymentMethods)
+		pendingPaymentMethods = null
+	}
+})
 
 // Currency symbol for display
 const currencySymbol = computed(() => getCurrencySymbol(props.currency))

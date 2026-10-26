@@ -1163,6 +1163,7 @@ import DeliveryRequestManagement from "@/components/journal/DeliveryRequestManag
 import OnlineOrderManagement from "@/components/journal/OnlineOrderManagement.vue";
 import InvoiceDetailDialog from "@/components/invoices/InvoiceDetailDialog.vue";
 import { useRealtimeStock } from "@/composables/useRealtimeStock";
+import { useSyncedDataRefresh } from "@/composables/useSyncedDataRefresh";
 import { usePOSEvents } from "@/composables/usePOSEvents";
 import { useLocale } from "@/composables/useLocale";
 import { session } from "@/data/session";
@@ -1214,6 +1215,12 @@ const { printFormat, showFormatDialog, setPrintFormat, promptForFormat, getEffec
 
 // Real-time stock updates
 const { onStockUpdate } = useRealtimeStock();
+
+// Pick up promos pulled by the 2-minute background sync without a restart
+useSyncedDataRefresh("offers", async () => {
+	const changed = await offersStore.reloadFromCache(shiftStore.profileName);
+	if (changed) cartStore.reevaluateOffersAfterSync();
+});
 
 // POS Events system
 const {
