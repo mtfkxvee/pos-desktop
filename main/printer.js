@@ -45,13 +45,17 @@ function scriptPath(filename) {
   return p.includes("app.asar") ? p.replace("app.asar", "app.asar.unpacked") : p;
 }
 
+function paperCols(paperSize) {
+  return paperSize === "80mm" ? 42 : 32;
+}
+
 function buildPrinter(paperSize = "58mm") {
   // Interface value is irrelevant here — we only ever call getBuffer(),
   // never execute() against this instance, so no real transport is opened.
   return new ThermalPrinter({
     type: PrinterTypes.EPSON,
     interface: "buffer-only",
-    width: paperSize === "80mm" ? 42 : 32,
+    width: paperCols(paperSize),
     removeSpecialCharacters: false,
     lineCharacter: "-",
   });
@@ -334,41 +338,103 @@ async function printReceipt(invoiceData, companyAddress, config) {
   return { success: true };
 }
 
+// "dd-mm-yyyy hh:mm", the closing report's date style.
+function fmtDateTime(d) {
+  if (!d) return "-";
+  const dt = d instanceof Date ? d : new Date(d);
+  if (isNaN(dt)) return "-";
+  const p = (n) => String(n).padStart(2, "0");
+  return `${p(dt.getDate())}-${p(dt.getMonth() + 1)}-${dt.getFullYear()} ${p(dt.getHours())}:${p(dt.getMinutes())}`;
+}
+
+// Signed difference: "+1.000" / "-1.000" / "+0".
+function signedNum(v) {
+  return (v >= 0 ? "+" : "") + num(v);
+}
+
 /**
- * @param {object} closingData - {pos_profile, sales_total, taxes[], payment_reconciliation[], returns_count}
+ * Port of the old app's shift-closing receipt (pos/POS/src/utils/
+ * bluetoothPrinter.js buildShiftClosingData), so both apps print the same layout.
+ *
+ * @param {object} closingData - {pos_profile, owner, period_start_date, sales_total,
+ *   returns_total, loyalty_redemption_total, taxes[] (amount), grand_total, sales_count,
+ *   returns_count, visitor, payment_reconciliation[] (mode_of_payment, opening_amount,
+ *   expected_amount, closing_amount, returns_amount)}
  */
 async function printShiftClosing(closingData, config) {
   const printer = buildPrinter(config.paperSize);
-
-  printer.alignCenter();
-  printer.bold(true);
-  printer.println("LAPORAN TUTUP SHIFT");
-  printer.bold(false);
-  printer.println(closingData.pos_profile || "");
-  printer.drawLine();
-  printer.alignLeft();
+  const cols = paperCols(config.paperSize);
+  const sep = (ch = "-") => printer.println(ch.repeat(cols));
+  const title = (text) => {
+    printer.bold(true);
+    printer.println(text);
+    printer.bold(false);
+  };
 
   const salesTotal = closingData.sales_total ?? closingData.grand_total ?? 0;
-  printer.leftRight("Total Penjualan", rp(salesTotal));
-
-  const reconciliation = (closingData.payment_reconciliation || []).filter(
+  const taxesTotal = (closingData.taxes || []).reduce((s, t) => s + (Number.parseFloat(t.amount) || 0), 0);
+  const payments = (closingData.payment_reconciliation || []).filter(
     (p) => Number(p.expected_amount) > 0 || Number(p.closing_amount) > 0
   );
-  if (reconciliation.length) {
-    printer.drawLine();
-    printer.println("REKONSILIASI PEMBAYARAN");
-    for (const p of reconciliation) {
-      const diff = Number(p.closing_amount || 0) - Number(p.expected_amount || 0);
-      printer.println(p.mode_of_payment || "");
-      printer.leftRight("  Expected", num(p.expected_amount));
-      printer.leftRight("  Actual", num(p.closing_amount));
-      if (diff !== 0) printer.leftRight("  Selisih", num(diff));
-    }
-  }
+  const hasReturns = (closingData.returns_count || 0) > 0;
+  const totalExpected = payments.reduce((s, p) => s + (Number.parseFloat(p.expected_amount) || 0), 0);
+  const totalActual = payments.reduce((s, p) => s + (Number.parseFloat(p.closing_amount) || 0), 0);
+  const now = new Date();
 
-  printer.drawLine();
   printer.alignCenter();
-  printer.println(new Date().toLocaleString("id-ID"));
+  title("CLOSING SHIFT");
+  title(closingData.pos_profile || "");
+
+  printer.alignLeft();
+  sep("=");
+  printer.println(`User : ${closingData.owner || "-"}`);
+  printer.println(`Start: ${fmtDateTime(closingData.period_start_date)}`);
+  printer.println(`End  : ${fmtDateTime(now)}`);
+  sep();
+
+  title("RINGKASAN PENJUALAN");
+  printer.leftRight("Penjualan Kotor", num(salesTotal));
+  if (closingData.returns_total) printer.leftRight("Return", `-${num(closingData.returns_total)}`);
+  if (closingData.loyalty_redemption_total) {
+    printer.leftRight("Loyalty Ditukar", `-${num(closingData.loyalty_redemption_total)}`);
+  }
+  if (taxesTotal) printer.leftRight("Pajak", num(taxesTotal));
+  sep("=");
+  printer.bold(true);
+  printer.leftRight("NET SALES", num(closingData.grand_total));
+  printer.bold(false);
+  sep("=");
+  printer.println(`Transaksi: ${closingData.sales_count || 0} jual, ${closingData.returns_count || 0} return`);
+  if (closingData.visitor) printer.println(`Pengunjung: ${closingData.visitor}`);
+  sep();
+
+  title("PEMBAYARAN");
+  for (const p of payments) {
+    const returnsAmt = Number.parseFloat(p.returns_amount || 0);
+    sep();
+    title(p.mode_of_payment || "");
+    printer.leftRight("  Saldo Awal", num(p.opening_amount));
+    if (hasReturns && returnsAmt !== 0) {
+      printer.leftRight("  Sebelum Retur", num(Number.parseFloat(p.expected_amount || 0) - returnsAmt));
+      printer.leftRight("  Dipotong", `-${num(Math.abs(returnsAmt))}`);
+    }
+    printer.leftRight("  Expected", num(p.expected_amount));
+    printer.leftRight("  Aktual", num(p.closing_amount));
+    printer.leftRight(
+      "  Selisih",
+      signedNum(Number.parseFloat(p.closing_amount || 0) - Number.parseFloat(p.expected_amount || 0))
+    );
+  }
+  sep("=");
+  printer.bold(true);
+  printer.leftRight("TOTAL EXPECTED", num(totalExpected));
+  printer.leftRight("TOTAL AKTUAL", num(totalActual));
+  printer.leftRight("SELISIH", signedNum(totalActual - totalExpected));
+  printer.bold(false);
+  sep("=");
+
+  printer.alignCenter();
+  printer.println(fmtDateTime(now));
   printer.cut();
 
   await sendBuffer(printer.getBuffer(), config);
