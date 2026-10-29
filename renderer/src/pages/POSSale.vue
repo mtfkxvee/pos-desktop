@@ -1173,7 +1173,7 @@ import { offlineWorker } from "@/utils/offline/workerClient";
 import { offlineState } from "@/utils/offline/offlineState";
 import { cacheInvoiceHistory, getCachedInvoiceHistory } from "@/utils/offline/sync";
 import { generateOfflineInvoiceId } from "@/utils/offline/invoiceId";
-import { enqueuePrint, printInvoiceByName, printInvoiceCustom } from "@/utils/printInvoice";
+import { printInvoiceByName, printInvoiceCustom } from "@/utils/printInvoice";
 import { reportStage } from "@/utils/checkoutTiming";
 import { findItemsWithoutName, formatItemsWithoutNameError } from "@/utils/invoice";
 import { usePrintFormat } from "@/composables/usePrintFormat";
@@ -2388,38 +2388,33 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 	// Auto-print: print directly, show toast only (no success dialog)
 	// No auto-print: show success dialog (has its own Print button)
 	if (shiftStore.autoPrintEnabled) {
-		// Printing runs in the background (queued, one receipt at a time) so
-		// the cashier can start the next sale immediately. On failure the
-		// success dialog opens — it has its own Print button for a reprint.
-		const printStartedAt = performance.now();
-		showSuccess(__("Invoice saved offline and sent to printer"));
-		enqueuePrint(offlinePrintData, getPaperSize() === "80mm" ? "80 PRINTER" : "58 PRINTER")
-			.then(() => {
-				reportStage("print", printStartedAt, { invoice: offlineName, paper_size: getPaperSize() });
-			})
-			.catch((printError) => {
-				log.warn("Offline print failed:", printError);
-				showWarning(__("Invoice tersimpan offline, tapi gagal dicetak"));
-				uiStore.showSuccess(offlineName, invoiceData.grand_total, paymentData.paid_amount);
+		try {
+			const printStartedAt = performance.now();
+			await printInvoiceCustom(offlinePrintData, getPaperSize() === "80mm" ? "80 PRINTER" : "58 PRINTER");
+			reportStage("print", printStartedAt, { invoice: offlineName, paper_size: getPaperSize() });
+			showSuccess(__("Invoice saved offline and sent to printer"));
+		} catch (printError) {
+			log.warn("Offline print failed:", printError);
+			showWarning(__("Invoice tersimpan offline, tapi gagal dicetak"));
 
-				// Record this in the ERP Error Log so support can see WHY printing
-				// failed at a given outlet (driver issue, printer offline, wrong
-				// port, etc.) without needing the cashier's console — same
-				// mechanism used for offline invoice/customer sync failures (see
-				// server/sync/push.js's handleSyncFailure). Best-effort: a failed
-				// log call must never surface as a second error on top of the
-				// print failure itself.
-				call("pos_next.api.utilities.log_client_error", {
-					title: "POS Print Failed After Checkout",
-					message: printError?.message || String(printError),
-					context: JSON.stringify({
-						invoice: offlineName,
-						pos_profile: shiftStore.profileName || null,
-						paper_size: getPaperSize(),
-						offline: offlineStore.isOffline,
-					}),
-				}).catch(() => {});
-			});
+			// Record this in the ERP Error Log so support can see WHY printing
+			// failed at a given outlet (driver issue, printer offline, wrong
+			// port, etc.) without needing the cashier's console — same
+			// mechanism used for offline invoice/customer sync failures (see
+			// server/sync/push.js's handleSyncFailure). Best-effort: a failed
+			// log call must never surface as a second error on top of the
+			// print failure itself.
+			call("pos_next.api.utilities.log_client_error", {
+				title: "POS Print Failed After Checkout",
+				message: printError?.message || String(printError),
+				context: JSON.stringify({
+					invoice: offlineName,
+					pos_profile: shiftStore.profileName || null,
+					paper_size: getPaperSize(),
+					offline: offlineStore.isOffline,
+				}),
+			}).catch(() => {});
+		}
 	} else {
 		uiStore.showSuccess(
 			offlineName,

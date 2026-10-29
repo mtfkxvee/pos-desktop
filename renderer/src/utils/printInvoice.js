@@ -61,22 +61,6 @@ export async function printInvoiceCustom(invoiceData, printFormat = "58 PRINTER"
   return printInvoice(invoiceData, printFormat)
 }
 
-// Receipts printed right after a sale go through this one-at-a-time chain so
-// the cashier never waits on the printer (PowerShell cold start, printer
-// timeouts) and two quick sales can't drive the printer concurrently.
-let printChain = Promise.resolve()
-
-/**
- * Queue a receipt print without blocking the caller.
- * @returns {Promise<boolean>} settles when THIS receipt finished (or failed);
- *   a failure here never breaks the chain for later receipts.
- */
-export function enqueuePrint(invoiceData, printFormat = "58 PRINTER") {
-  const job = printChain.then(() => printInvoiceCustom(invoiceData, printFormat))
-  printChain = job.catch(() => {})
-  return job
-}
-
 /**
  * Print invoice by name, fetching the full doc (+ loyalty points) first.
  * @param {string} invoiceName
