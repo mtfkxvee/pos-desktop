@@ -2550,9 +2550,16 @@ function clearAll() {
 }
 
 let isCompleting = false
+// Bumped every time the dialog opens or closes. completePayment awaits the
+// loyalty fetch, and the cashier may close/reopen the dialog meanwhile (which
+// empties paymentEntries); a completion that started in an older session must
+// not emit — it would pair stale/empty payments with the current cart
+// (MNRWIN281019340065-070: six unpaid invoices from one Enter burst).
+let dialogSession = 0
 watch(
 	() => props.modelValue,
 	(open) => {
+		dialogSession++
 		if (open) isCompleting = false
 	},
 )
@@ -2580,6 +2587,7 @@ async function completePayment() {
 	// Repeated Enter presses (lag) would otherwise each emit a payment-completed
 	if (isCompleting) return
 	isCompleting = true
+	const session = dialogSession
 
 	// A fast cashier can hit "complete" before the loyalty points fetch
 	// triggered on dialog-open (see onMounted) has resolved — without this,
@@ -2594,6 +2602,11 @@ async function completePayment() {
 			// onError already reset loyaltyPointInfo to a safe zero default
 		}
 		reportStage("loyalty-wait", loyaltyWaitStartedAt)
+
+		if (session !== dialogSession) {
+			log.warn("[PaymentDialog] Dialog was closed/reopened while waiting, dropping stale completion")
+			return
+		}
 	}
 
 	log.debug("[PaymentDialog] Loyalty calc at completion:", {
