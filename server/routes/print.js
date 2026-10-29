@@ -3,6 +3,7 @@ const { execFile } = require("child_process");
 const { isPrinterReady, printReceipt, printShiftClosing, printCupLabel } = require("../../main/printer");
 const { loadDeviceConfig, saveDeviceConfig } = require("../../main/secure-store");
 const { getDb } = require("../db/client");
+const { markCheckoutActivity } = require("../sync/activity");
 
 const router = express.Router();
 
@@ -138,6 +139,7 @@ router.post("/config", (req, res) => {
 });
 
 router.post("/receipt", async (req, res) => {
+  markCheckoutActivity();
   try {
     const { invoice } = req.body || {};
     const result = await printReceipt(invoice, getCachedCompanyAddress(invoice?.pos_profile), printerConfig());

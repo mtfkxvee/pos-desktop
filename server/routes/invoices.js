@@ -4,6 +4,7 @@ const { getDb } = require("../db/client");
 const { callMethod } = require("../frappe-client");
 const { pingServer } = require("../sync/ping");
 const { loadDeviceConfig } = require("../auth/device-setup");
+const { markCheckoutActivity } = require("../sync/activity");
 
 const router = express.Router();
 
@@ -12,6 +13,7 @@ function generateOfflineId(outletCode) {
 }
 
 function queueInvoiceLocally({ invoice, data, device }) {
+  markCheckoutActivity();
   const offlineId = generateOfflineId(device?.outletCode);
   const db = getDb();
   const now = new Date().toISOString();

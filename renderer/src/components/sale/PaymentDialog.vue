@@ -1093,6 +1093,7 @@ import { logger } from "@/utils/logger"
 import { Dialog, createResource } from "frappe-ui"
 import { call } from "@/utils/apiWrapper"
 import { computed, ref, watch, nextTick, onMounted, onBeforeUnmount } from "vue"
+import { reportStage } from "@/utils/checkoutTiming"
 import { useToast } from "@/composables/useToast"
 import { useLongPress } from "@/composables/useLongPress"
 import { usePaymentNumpad } from "@/composables/usePaymentNumpad"
@@ -2586,11 +2587,13 @@ async function completePayment() {
 	// computes 0, so the receipt is missing "Poin Didapat" even for a
 	// qualifying sale. Wait for it (briefly, it's already in flight).
 	if (loyaltyFetchPromise) {
+		const loyaltyWaitStartedAt = performance.now()
 		try {
 			await loyaltyFetchPromise
 		} catch {
 			// onError already reset loyaltyPointInfo to a safe zero default
 		}
+		reportStage("loyalty-wait", loyaltyWaitStartedAt)
 	}
 
 	log.debug("[PaymentDialog] Loyalty calc at completion:", {
