@@ -2548,6 +2548,14 @@ function clearAll() {
 	customAmount.value = ""
 }
 
+let isCompleting = false
+watch(
+	() => props.modelValue,
+	(open) => {
+		if (open) isCompleting = false
+	},
+)
+
 async function completePayment() {
 	log.debug("[PaymentDialog] Complete payment called:", {
 		canComplete: canComplete.value,
@@ -2567,6 +2575,10 @@ async function completePayment() {
 		log.warn("[PaymentDialog] Cannot complete - validation failed")
 		return
 	}
+
+	// Repeated Enter presses (lag) would otherwise each emit a payment-completed
+	if (isCompleting) return
+	isCompleting = true
 
 	// A fast cashier can hit "complete" before the loyalty points fetch
 	// triggered on dialog-open (see onMounted) has resolved — without this,

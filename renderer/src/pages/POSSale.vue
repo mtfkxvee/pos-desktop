@@ -2428,7 +2428,17 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 	}
 }
 
+// Re-entrancy guard: on a lagging machine the cashier hits Enter several times
+// while the first checkout is still awaiting, and every queued Enter used to
+// save its own copy of the same cart (5 identical invoices).
+let isCheckingOut = false;
+
 async function handlePaymentCompleted(paymentData) {
+	if (isCheckingOut) {
+		log.warn("Checkout already in progress, ignoring duplicate submit");
+		return;
+	}
+	isCheckingOut = true;
 	try {
 		const customerValue = cartStore.customer?.name || cartStore.customer;
 		if (!customerValue && !shiftStore.profileCustomer) {
@@ -2445,6 +2455,31 @@ async function handlePaymentCompleted(paymentData) {
 			showError(formatItemsWithoutNameError(itemsWithoutName));
 			uiStore.showPaymentDialog = false;
 			return;
+		}
+
+		// The payment dialog normally guarantees a fully-covered cart, but a
+		// delayed/duplicate submit from the PREVIOUS sale's dialog can arrive
+		// after the cart was refilled (TASMAR281019040096: new 23.500 cart saved
+		// with the old sale's 15.900 payment). Verify against the live cart.
+		if (cartStore.invoiceItems.length === 0) {
+			log.warn("Checkout ignored: cart is empty");
+			uiStore.showPaymentDialog = false;
+			return;
+		}
+		if (!posSettingsStore.allowPartialPayment && !paymentData.is_credit_sale) {
+			const covered =
+				(paymentData.payments || []).reduce((sum, p) => sum + (Number.parseFloat(p.amount) || 0), 0) +
+				(paymentData.loyalty_amount || 0) +
+				(paymentData.write_off_amount || 0);
+			if (covered + 1 < cartStore.grandTotal) {
+				log.warn("Checkout blocked: payment does not cover cart total", {
+					covered,
+					grandTotal: cartStore.grandTotal,
+				});
+				showError(__("Pembayaran tidak sesuai dengan total keranjang. Silakan ulangi pembayaran."));
+				uiStore.showPaymentDialog = false;
+				return;
+			}
 		}
 
 		cartStore.clearPayments();
@@ -2522,6 +2557,8 @@ async function handlePaymentCompleted(paymentData) {
 		} else {
 			showWarning(errorContext.message);
 		}
+	} finally {
+		isCheckingOut = false;
 	}
 }
 
