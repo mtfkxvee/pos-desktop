@@ -111,6 +111,15 @@
 					</div>
 				</div>
 
+				<!-- Cash drawer (plugged into the printer's RJ11 drawer port) -->
+				<label class="flex items-start gap-3 cursor-pointer">
+					<input v-model="cashDrawer" type="checkbox" class="mt-0.5 h-4 w-4 rounded border-gray-300 text-blue-600" />
+					<span>
+						<span class="block text-sm font-medium text-gray-700">{{ __('Buka cash drawer saat cetak struk') }}</span>
+						<span class="block text-xs text-gray-500">{{ __('Untuk laci uang yang dicolok ke printer. Aman dibiarkan aktif walau tidak ada laci.') }}</span>
+					</span>
+				</label>
+
 				<div v-if="message" :class="['text-sm rounded-lg px-3 py-2', messageIsError ? 'bg-red-50 text-red-700' : 'bg-green-50 text-green-700']">
 					{{ message }}
 				</div>
@@ -150,6 +159,7 @@ const loadingComPorts = ref(false)
 const selectedComPort = ref("")
 const baudRate = ref("9600")
 const paperSize = ref("58mm")
+const cashDrawer = ref(true)
 
 function parseInterface(printerInterface) {
 	if (!printerInterface || printerInterface === "printer:auto") return
@@ -208,6 +218,7 @@ async function loadConfig() {
 		parseInterface(config.printerInterface)
 		paperSize.value = config.paperSize || "58mm"
 		baudRate.value = String(config.baudRate || 9600)
+		cashDrawer.value = config.cashDrawer !== false
 	} catch (err) {
 		message.value = __("Gagal memuat konfigurasi printer: {0}", [err.message])
 		messageIsError.value = true
@@ -240,6 +251,7 @@ async function save() {
 				printerInterface: printerInterface.value,
 				paperSize: paperSize.value,
 				baudRate: Number(baudRate.value) || 9600,
+				cashDrawer: cashDrawer.value,
 			}),
 		})
 		const data = await res.json()

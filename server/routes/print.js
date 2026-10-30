@@ -92,6 +92,10 @@ function printerConfig() {
     printerInterface: device.printerInterface || "printer:auto",
     paperSize: device.paperSize || "58mm",
     baudRate: device.baudRate || 9600,
+    // On unless explicitly turned off: a kick to a printer with no drawer
+    // attached does nothing, and outlets that have one expect it to open
+    // like it did under the old app.
+    cashDrawer: device.cashDrawer !== false,
   };
 }
 
@@ -134,6 +138,7 @@ router.post("/config", (req, res) => {
     printerInterface: req.body.printerInterface || device.printerInterface,
     paperSize: req.body.paperSize || device.paperSize,
     baudRate: req.body.baudRate || device.baudRate,
+    cashDrawer: typeof req.body.cashDrawer === "boolean" ? req.body.cashDrawer : device.cashDrawer,
   });
   res.json({ success: true, config: printerConfig() });
 });

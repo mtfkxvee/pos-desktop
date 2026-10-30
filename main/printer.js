@@ -61,6 +61,15 @@ function buildPrinter(paperSize = "58mm") {
   });
 }
 
+// ESC p m t1 t2 — pulse the cash drawer port, pin 2 then pin 5 (drawers are
+// wired to one or the other; a pulse to an empty pin is ignored). The old
+// app never sent this itself: it printed through the Windows driver, whose
+// own "open cash drawer" setting did the kick — RAW printing bypasses that.
+// Not node-thermal-printer's openCashDrawer(): its EPSON CD_KICK_2/5 are
+// only `ESC p m` with no t1/t2, so the printer eats the next two receipt
+// bytes as pulse timing.
+const CASH_DRAWER_KICK = Buffer.from([0x1b, 0x70, 0x00, 0x19, 0xfa, 0x1b, 0x70, 0x01, 0x19, 0xfa]);
+
 async function sendOverNetwork(buffer, host, port) {
   await new Promise((resolve, reject) => {
     const socket = net.connect(port, host);
@@ -226,7 +235,7 @@ function shortTime(t) {
  *   outstanding_amount, loyalty_points, redeem_loyalty_points, terms,
  *   remarks}
  * @param {object} companyAddress - {address_title, address_line1, address_line2, city, phone}
- * @param {object} config - {printerInterface, paperSize}
+ * @param {object} config - {printerInterface, paperSize, cashDrawer}
  *
  * Field-for-field port of the real "58 TEST" Print Format's Jinja (fetched
  * via server/sync/pull.js's pullPrintFormat, cached per POS Profile under
@@ -237,6 +246,9 @@ function shortTime(t) {
  */
 async function printReceipt(invoiceData, companyAddress, config) {
   const printer = buildPrinter(config.paperSize);
+
+  // Kick first so the drawer is already open while the receipt prints.
+  if (config.cashDrawer) printer.append(CASH_DRAWER_KICK);
 
   // ── Company address header ──
   printer.alignCenter();
