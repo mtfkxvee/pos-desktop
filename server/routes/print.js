@@ -21,6 +21,21 @@ function getCachedCompanyAddress(posProfile) {
   return row ? JSON.parse(row.value) : null;
 }
 
+// Kode pelanggan (Customer.custom_kode_pelanggan) for the receipt, falling
+// back to the Customer ID when it has none. Looked up from the customers
+// cache rather than trusted from the invoice: a reprint of a synced invoice
+// comes straight from ERP's get_invoice, which may not carry the field, and
+// offline-created customers sit in the same cache under their temp name.
+function resolveCustomerCode(invoice) {
+  const id = invoice?.customer;
+  const fromInvoice = String(invoice?.custom_kode_pelanggan || "").trim();
+  if (fromInvoice || !id) return fromInvoice;
+  const row = getDb()
+    .prepare("SELECT json_extract(data, '$.custom_kode_pelanggan') AS kode FROM customers WHERE name = ?")
+    .get(id);
+  return String(row?.kode || "").trim() || id;
+}
+
 // Lists Windows-installed printers (USB and shared) so the settings UI can
 // offer a dropdown instead of asking the cashier/admin to type the exact
 // Windows printer name by hand.
@@ -147,7 +162,11 @@ router.post("/receipt", async (req, res) => {
   markCheckoutActivity();
   try {
     const { invoice } = req.body || {};
-    const result = await printReceipt(invoice, getCachedCompanyAddress(invoice?.pos_profile), printerConfig());
+    const result = await printReceipt(
+      { ...invoice, customer_code: resolveCustomerCode(invoice) },
+      getCachedCompanyAddress(invoice?.pos_profile),
+      printerConfig()
+    );
     res.json(result);
   } catch (err) {
     res.status(500).json({ error: err.message });

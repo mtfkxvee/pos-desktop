@@ -227,7 +227,8 @@ function shortTime(t) {
 
 /**
  * @param {object} invoiceData - Sales/POS Invoice-shaped data: {name, owner,
- *   posting_date, posting_time, customer_name, customer, items[] (each with
+ *   posting_date, posting_time, customer_name, customer, customer_code
+ *   (resolved by server/routes/print.js), items[] (each with
  *   item_name/item_code, qty, price_list_rate, discount_amount, serial_no),
  *   total, taxes[] (description, rate, tax_amount, included_in_print_rate),
  *   discount_amount, loyalty_amount, grand_total, rounded_total, payments[]
@@ -270,6 +271,7 @@ async function printReceipt(invoiceData, companyAddress, config) {
     `Ksr: ${String(invoiceData.owner || "").slice(0, 8)} Tgl: ${invoiceData.posting_date || ""} ${shortTime(invoiceData.posting_time)}`
   );
   printer.println(`Pel: ${truncateCustomerName(invoiceData.customer_name || invoiceData.customer || "Guest")}`);
+  if (invoiceData.customer_code) printer.println(`Kode Pel: ${invoiceData.customer_code}`);
   printer.drawLine();
 
   // ── Items ── (price_list_rate, not rate — matches what the format prints)

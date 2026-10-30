@@ -265,6 +265,8 @@ async function handlePrintDraft(draft) {
 			payments: [],
 			grand_total: calculateTotal(draft.items),
 			posting_date: draft.created_at,
+			customer: draft.customer?.name || draft.customer,
+			custom_kode_pelanggan: draft.customer?.custom_kode_pelanggan,
 			customer_name:
 				draft.customer?.customer_name || draft.customer?.name || draft.customer,
 			owner: draft.owner || userName.value || "Administrator",
