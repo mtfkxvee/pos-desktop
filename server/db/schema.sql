@@ -94,12 +94,17 @@ CREATE TABLE IF NOT EXISTS payment_methods (
 );
 
 -- Promotional offers cache (from get_offers).
+-- Keyed by (name, pos_profile): get_offers returns company-wide Pricing Rules,
+-- so the same rule shows up for every POS Profile of the company. With `name`
+-- alone as the key, caching one profile reassigned those rules away from the
+-- others (see migrateOffersTable in client.js for devices that still have it).
 CREATE TABLE IF NOT EXISTS offers (
-  name TEXT PRIMARY KEY,
-  pos_profile TEXT,
+  name TEXT NOT NULL,
+  pos_profile TEXT NOT NULL DEFAULT '',
   valid_upto TEXT,
   modified TEXT,
-  data TEXT NOT NULL
+  data TEXT NOT NULL,
+  PRIMARY KEY (name, pos_profile)
 );
 CREATE INDEX IF NOT EXISTS idx_offers_pos_profile ON offers(pos_profile);
 

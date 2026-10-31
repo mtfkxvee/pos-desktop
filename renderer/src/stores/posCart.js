@@ -2116,6 +2116,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// IMPORTANT: This must happen BEFORE hash check, because if offers weren't
 		// fetched on previous runs, we need to re-process even if cart hash matches
 		const wasFetched = offersStore.hasFetched
+		const offersVersionBefore = offersStore.offersVersion
 		// posProfile.value is the profile name string directly
 		const profileName = posProfile.value
 		await offersStore.ensureOffersFetched(profileName)
@@ -2128,7 +2129,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 
 		// Skip if cart hasn't changed since last successful processing (unless forced)
 		// Also force re-processing if offers were just fetched for the first time
-		const justFetched = !wasFetched && offersStore.hasFetched
+		// ...or if the ERP's promo list changed since the last run (it is
+		// re-read at least once a minute while online)
+		const justFetched =
+			(!wasFetched && offersStore.hasFetched) ||
+			offersStore.offersVersion !== offersVersionBefore
 		if (
 			!force &&
 			!justFetched &&
@@ -2224,8 +2229,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		// silent once retries are exhausted.
 		const MAX_AUTO_RETRIES = 6
 
-		// Enqueue the processing task - queue handles concurrency
-		offerQueue.enqueue(async (signal) => {
+		// Enqueue the processing task - queue handles concurrency. Returned so
+		// a caller that must see the result (checkout) can wait for it.
+		return offerQueue.enqueue(async (signal) => {
 			offerProcessingState.value.isProcessing = true
 			offerProcessingState.value.isAutoProcessing = true
 			offerProcessingState.value.error = null
@@ -2294,7 +2300,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	function reevaluateOffersAfterSync() {
 		if (invoiceItems.value.length === 0) return
 		offerProcessingState.value.lastCartHash = ""
-		triggerOfferProcessing(true)
+		return triggerOfferProcessing(true)
 	}
 
 	/**

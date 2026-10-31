@@ -2226,7 +2226,7 @@ function handleCustomerSelected(selectedCustomer) {
 
 		if (pendingPaymentAfterCustomer.value) {
 			pendingPaymentAfterCustomer.value = false;
-			uiStore.showPaymentDialog = true;
+			handleProceedToPayment();
 		}
 	} else {
 		cartStore.setCustomer(null);
@@ -2245,7 +2245,25 @@ function handleEditCustomer(customer) {
 	uiStore.showCreateCustomerDialog = true;
 }
 
-function handleProceedToPayment() {
+// Promos are re-read from the ERP right before payment, so the total the
+// cashier is about to collect reflects the promos as they are in ERP right now.
+// Bounded and never throws: a slow or failing ERP must not hold up checkout —
+// the list already in memory (or the cache) is used instead.
+async function refreshOffersBeforePayment() {
+	if (offlineStore.isOffline || !shiftStore.profileName) return;
+	const within = (promise, ms) =>
+		Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+	try {
+		const changed = await within(offersStore.refreshOffers(shiftStore.profileName), 3000);
+		// The dialog freezes offer recalculation when it opens, so a changed
+		// list has to be applied to the cart first
+		if (changed === true) await within(cartStore.reevaluateOffersAfterSync(), 4000);
+	} catch (error) {
+		log.warn("Could not refresh promos before payment", error);
+	}
+}
+
+async function handleProceedToPayment() {
 	if (versionCheck.updateRequired.value) {
 		showWarning(__("Sistem perlu diperbarui sebelum dapat melanjutkan transaksi. Silakan refresh halaman."));
 		return;
@@ -2264,6 +2282,7 @@ function handleProceedToPayment() {
 		return;
 	}
 
+	await refreshOffersBeforePayment();
 	uiStore.showPaymentDialog = true;
 }
 

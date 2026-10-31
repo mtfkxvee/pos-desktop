@@ -281,34 +281,89 @@ async function pullPaymentMethods(posProfile) {
  * offers the server no longer returns (expired/deactivated), which a
  * pure upsert would otherwise leave behind forever.
  */
-async function pullOffers(posProfile) {
-  const offers = await callMethod("pos_next.api.offers.get_offers", {
-    pos_profile: posProfile,
-  });
-  const rows = offers || [];
+// get_offers answers [] (HTTP 200) when anything inside it fails — it catches
+// every exception, e.g. while the ERP database is struggling — so an empty list
+// can't be taken at face value: wiping the cache on it left the cashier with no
+// promos, online or offline. An empty answer is kept out of the cache until it
+// has held for EMPTY_OFFERS_GRACE_MS (promos really all gone); non-empty
+// answers always replace the cache.
+const EMPTY_OFFERS_GRACE_MS = 60 * 60 * 1000;
+
+function localDate(d = new Date()) {
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function cachedOffers(posProfile) {
+  return getDb()
+    .prepare("SELECT data FROM offers WHERE pos_profile = ?")
+    .all(posProfile)
+    .map((r) => JSON.parse(r.data));
+}
+
+// Stores what the ERP answered for `posProfile` and returns the list that
+// should be in effect (the answer itself, or the cache it was kept out of).
+function storeOffers(posProfile, rows) {
+  if (!Array.isArray(rows)) throw new Error("Respon promo dari server tidak valid");
+
   const db = getDb();
+  const now = new Date();
+  const emptyKey = `offers_empty_since:${posProfile}`;
   const insert = db.prepare(
     `INSERT INTO offers (name, pos_profile, valid_upto, modified, data) VALUES (?, ?, ?, ?, ?)
-     ON CONFLICT(name) DO UPDATE SET pos_profile = excluded.pos_profile,
-       valid_upto = excluded.valid_upto, modified = excluded.modified, data = excluded.data`
+     ON CONFLICT(name, pos_profile) DO UPDATE SET valid_upto = excluded.valid_upto,
+       modified = excluded.modified, data = excluded.data`
   );
-  const now = new Date().toISOString();
+  const setSetting = db.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+  );
+
   // node:sqlite's DatabaseSync has no .transaction() helper (that's a
   // better-sqlite3-only API) — raw BEGIN/COMMIT/ROLLBACK, same as
   // pullItems() above, is the actual API this project's db/client.js uses.
   db.exec("BEGIN");
   try {
-    db.prepare("DELETE FROM offers WHERE pos_profile = ?").run(posProfile);
-    for (const o of rows) {
-      insert.run(o.name, posProfile, o.valid_upto || null, now, JSON.stringify(o));
+    // Promos past their end date go either way
+    db.prepare(
+      "DELETE FROM offers WHERE pos_profile = ? AND valid_upto IS NOT NULL AND valid_upto <> '' AND valid_upto < ?"
+    ).run(posProfile, localDate(now));
+
+    let replace = rows.length > 0;
+    if (rows.length > 0) {
+      db.prepare("DELETE FROM settings WHERE key = ?").run(emptyKey);
+    } else {
+      const hasCache = db.prepare("SELECT 1 FROM offers WHERE pos_profile = ? LIMIT 1").get(posProfile);
+      const sinceRow = db.prepare("SELECT value FROM settings WHERE key = ?").get(emptyKey);
+      const since = sinceRow ? Number(JSON.parse(sinceRow.value)) : null;
+      if (!hasCache) {
+        replace = true;
+      } else if (since === null) {
+        setSetting.run(emptyKey, JSON.stringify(now.getTime()));
+      } else if (now.getTime() - since >= EMPTY_OFFERS_GRACE_MS) {
+        replace = true;
+      }
+    }
+
+    if (replace) {
+      db.prepare("DELETE FROM offers WHERE pos_profile = ?").run(posProfile);
+      const stamp = now.toISOString();
+      for (const o of rows) insert.run(o.name, posProfile, o.valid_upto || null, stamp, JSON.stringify(o));
     }
     db.exec("COMMIT");
+    return replace ? rows : cachedOffers(posProfile);
   } catch (err) {
     db.exec("ROLLBACK");
     throw err;
   }
-  setSyncState("offers", { lastModified: null, lastSyncedAt: now });
-  return { count: rows.length };
+}
+
+async function pullOffers(posProfile) {
+  const offers = await callMethod("pos_next.api.offers.get_offers", {
+    pos_profile: posProfile,
+  });
+  const effective = storeOffers(posProfile, offers);
+  setSyncState("offers", { lastModified: null, lastSyncedAt: new Date().toISOString() });
+  return { count: effective.length };
 }
 
 async function pullPosProfile(posProfile) {
@@ -496,6 +551,7 @@ module.exports = {
   pullPaymentMethods,
   pullPosProfile,
   pullOffers,
+  storeOffers,
   pullPrintFormat,
   pullCompanyAddress,
   pullPinnedItems,

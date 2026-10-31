@@ -25,8 +25,17 @@ function getDiscountSortValue(offer) {
 	return Number.parseFloat(offer?.discount_amount) || 0
 }
 
+// While online, the promo list is re-read from the ERP at least this often
+// (and always right before payment — see refreshOffers), never just once per
+// session: a Pricing Rule added or changed in ERP shows up within a minute.
+const OFFERS_MAX_AGE_MS = 60 * 1000
+
 export const usePOSOffersStore = defineStore("posOffers", () => {
 	const availableOffers = ref([])
+	// Bumped whenever a fetch actually changed the list, so the cart knows to
+	// re-evaluate its discounts against it
+	const offersVersion = ref(0)
+	let lastAttemptAt = 0
 	const cartSnapshot = ref(defaultSnapshot())
 	const hasFetched = ref(false)
 
@@ -319,17 +328,27 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 	// Track if we're currently fetching to prevent duplicate requests
 	let fetchPromise = null
 
+	// Put a fetched list in place; bumps offersVersion only if it differs
+	function applyFetchedOffers(offers) {
+		const changed = JSON.stringify(offers) !== JSON.stringify(availableOffers.value)
+		setAvailableOffers(offers)
+		if (changed) offersVersion.value++
+		return changed
+	}
+
 	/**
-	 * Ensures offers are fetched before offer processing.
-	 * This is critical for mobile view where InvoiceCart (which loads offers)
-	 * may not be mounted when items are first added to the cart.
+	 * Loads the promo list. Online it always comes from the ERP (the local
+	 * server writes each answer to its offline cache); offline it comes from
+	 * that cache.
 	 *
 	 * @param {string} posProfile - POS Profile name to fetch offers for
+	 * @param {boolean} force - re-read from the ERP even if the list is recent
 	 * @returns {Promise<boolean>} True if offers are available (fetched or cached)
 	 */
-	async function ensureOffersFetched(posProfile) {
-		// If already fetched, return immediately
-		if (hasFetched.value) {
+	async function loadOffers(posProfile, force = false) {
+		const stale =
+			force || (hasFetched.value && !isOffline() && Date.now() - lastAttemptAt > OFFERS_MAX_AGE_MS)
+		if (hasFetched.value && !stale) {
 			return true
 		}
 
@@ -343,6 +362,8 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 			return false
 		}
 
+		const refetching = hasFetched.value
+
 		// Start fetching
 		fetchPromise = (async () => {
 			try {
@@ -350,7 +371,7 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 					// Load offers from cache when offline
 					const cachedOffers = await offlineWorker.getCachedOffers(posProfile)
 					if (cachedOffers && cachedOffers.length > 0) {
-						setAvailableOffers(cachedOffers)
+						applyFetchedOffers(cachedOffers)
 						return true
 					}
 					// No cached offers available offline. This is ambiguous —
@@ -364,26 +385,34 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 					// instead lets the caller's bounded retry/backoff (see
 					// triggerOfferProcessing in posCart.js) keep trying, and
 					// warn the cashier if it truly never resolves.
+					if (refetching) return true
 					throw new Error("Tidak ada data promo tersimpan untuk mode offline")
 				}
 
-				// Online: fetch from API
+				// Online: fetch from API. Set before the call so a failing
+				// server isn't hit again on every cart change.
+				lastAttemptAt = Date.now()
 				const response = await call("pos_next.api.offers.get_offers", {
 					pos_profile: posProfile,
 				})
 
 				const offers = response?.message || response || []
-				setAvailableOffers(offers)
-
-				// Cache offers for offline use
-				if (offers.length > 0) {
-					offlineWorker.cacheOffers(offers, posProfile).catch(() => {
-						// Silently ignore cache errors
-					})
-				}
+				applyFetchedOffers(offers)
 
 				return true
 			} catch (error) {
+				// Never end up with fewer promos just because the ERP is
+				// struggling: keep the list already loaded, else the cached one.
+				if (refetching) {
+					console.warn("Offers refresh failed, keeping current list:", error)
+					return true
+				}
+				const cached = await offlineWorker.getCachedOffers(posProfile).catch(() => null)
+				if (Array.isArray(cached) && cached.length > 0) {
+					console.warn("Offers fetch failed, using cached list:", error)
+					applyFetchedOffers(cached)
+					return true
+				}
 				console.error("Error fetching offers:", error)
 				// Deliberately NOT setting hasFetched=true here anymore — that
 				// used to permanently latch this store into "no offers, don't
@@ -402,26 +431,24 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		return fetchPromise
 	}
 
+	/** Called before offer processing; re-reads the list from the ERP when it's older than OFFERS_MAX_AGE_MS. */
+	function ensureOffersFetched(posProfile) {
+		return loadOffers(posProfile, false)
+	}
+
 	/**
-	 * Re-fetch the offer list even though this session already has one.
-	 * ensureOffersFetched() only ever fetches once per session (hasFetched),
-	 * so a Pricing Rule created in ERP after the POS was opened stayed
-	 * invisible until the app restarted — a manual promo sync only refreshed
-	 * the local server cache, never this store. Keeps the old list if the
-	 * refetch fails, so a flaky request can't wipe out working promos.
+	 * Re-read the offer list from the ERP right now, even if the current one is
+	 * recent (manual promo sync, and just before payment). Keeps the old list if
+	 * the refetch fails, so a flaky request can't wipe out working promos.
 	 *
 	 * @param {string} posProfile - POS Profile name to fetch offers for
+	 * @returns {Promise<boolean>} True if the list changed
 	 */
 	async function refreshOffers(posProfile) {
 		if (fetchPromise) await fetchPromise.catch(() => {})
-		const previous = availableOffers.value
-		hasFetched.value = false
-		try {
-			await ensureOffersFetched(posProfile)
-		} catch (error) {
-			setAvailableOffers(previous)
-			throw error
-		}
+		const versionBefore = offersVersion.value
+		await loadOffers(posProfile, true)
+		return offersVersion.value !== versionBefore
 	}
 
 	/**
@@ -435,16 +462,14 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 		if (!posProfile || fetchPromise) return false
 		const cached = await offlineWorker.getCachedOffers(posProfile)
 		if (!Array.isArray(cached)) return false
-		if (hasFetched.value && JSON.stringify(cached) === JSON.stringify(availableOffers.value)) {
-			return false
-		}
-		setAvailableOffers(cached)
-		return true
+		const wasFetched = hasFetched.value
+		return applyFetchedOffers(cached) || !wasFetched
 	}
 
 	return {
 		// State
 		availableOffers,
+		offersVersion,
 		cartSnapshot,
 		hasFetched,
 

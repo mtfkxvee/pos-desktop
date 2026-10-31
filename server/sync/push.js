@@ -72,6 +72,22 @@ function handleSyncFailure(row, errorMessage) {
  * unacknowledged submit doesn't double-submit — this lines up with the
  * 5-minute pending-expiry window on the "Offline Invoice Sync" doctype.
  */
+// The cashier collected `grand_total`, so that is what the invoice must come
+// to in the ERP. Queued invoices carry no ui_grand_total (data is {}), which
+// left submit_invoice to work the total out itself; any discount it didn't
+// reproduce exactly (promo, coupon, item offer) then made the invoice disagree
+// with the payment and get rejected on sync. With it, the ERP locks the total
+// to this figure and absorbs the difference into the discount — the same
+// thing the online checkout has always sent. Done here, not at queue time, so
+// invoices already stuck in the queue are covered too.
+function lockToPaidTotal(payload) {
+  const invoice = payload.invoice || {};
+  const paidTotal = Number(invoice.grand_total) || 0;
+  if (invoice.is_return || paidTotal <= 0) return;
+  payload.data = payload.data || {};
+  if (!payload.data.ui_grand_total) payload.data.ui_grand_total = paidTotal;
+}
+
 async function syncInvoiceToServer(row, retryCount = 0) {
   const syncStatus = await checkOfflineIdSynced(row.offline_id);
   if (syncStatus.synced) {
@@ -83,6 +99,7 @@ async function syncInvoiceToServer(row, retryCount = 0) {
   if (payload.invoice?.posa_pos_opening_shift) {
     payload.invoice.posa_pos_opening_shift = resolveShiftName(payload.invoice.posa_pos_opening_shift);
   }
+  lockToPaidTotal(payload);
 
   try {
     const response = await callMethod("pos_next.api.invoices.submit_invoice", {

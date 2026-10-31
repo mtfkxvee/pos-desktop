@@ -18,6 +18,7 @@ const {
   pullCompanyAddress,
   pullPinnedItems,
   pullPinnedCategories,
+  storeOffers,
 } = require("../sync/pull");
 
 const router = express.Router();
@@ -300,7 +301,20 @@ router.post("/:method", async (req, res) => {
     if (method === "pos_next.api.shifts.check_opening_shift" && hasPendingShifts()) {
       await pushQueuedShifts().catch(() => {});
     }
-    const result = await callMethod(method, params);
+    let result = await callMethod(method, params);
+
+    // Promos are always read live from the ERP, and every live answer is also
+    // written to the offline cache right here, so what a cashier sees offline
+    // is exactly the last thing the ERP said — not whatever the 2-minute
+    // background pull last caught. storeOffers also hands back the cached list
+    // instead of an empty one the ERP can't be trusted on (see pull.js).
+    if (method === "pos_next.api.offers.get_offers" && params?.pos_profile) {
+      try {
+        result = storeOffers(params.pos_profile, result);
+      } catch {
+        // Cache problems must never stop the live answer from reaching the cashier
+      }
+    }
 
     if (
       method === "pos_next.api.shifts.check_opening_shift" &&
