@@ -41,7 +41,10 @@ function startServer({ port = 8871, dbPath } = {}) {
   setTimeout(() => invalidateSearch("customers"), 1500);
 
   const app = express();
-  app.use(express.json());
+  // The 100kb default rejected big receipt/closing-shift payloads with a 413
+  // ("Print gagal (HTTP 413)"): a shift-closing body carries every invoice of
+  // the shift. Safe to raise since the server only listens on 127.0.0.1.
+  app.use(express.json({ limit: "20mb" }));
   // Server only binds to 127.0.0.1 (never exposed externally), so a
   // permissive CORS policy here just lets the Vite dev server (5173) and the
   // built renderer (file://) talk to it without friction.
