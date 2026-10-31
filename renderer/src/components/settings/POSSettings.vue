@@ -388,6 +388,12 @@
 												:label="__('Enable Order Monitor')"
 												:description="__('Tampilkan tab Order Monitor di POS untuk memantau dan update status antrian pesanan.')"
 											/>
+											<CheckboxField
+												:model-value="posSettingsStore.scanToCatalog"
+												@update:model-value="posSettingsStore.setScanToCatalog"
+												:label="__('Scan Barcode Tampil di Katalog')"
+												:description="__('Item hasil scan hanya ditampilkan di katalog, tidak langsung masuk keranjang. Berlaku langsung di perangkat ini (tanpa Simpan).')"
+											/>
 											<p class="text-xs text-gray-400 -mt-1">
 												{{ __('Cup label & struk kini dicetak lewat printer yang sama (lihat Pengaturan Printer) - tidak ada lagi jalur Bluetooth/USB terpisah seperti versi web lama.') }}
 											</p>
@@ -430,9 +436,11 @@ import {
 import { offlineWorker } from "@/utils/offline/workerClient"
 import { logger } from "@/utils/logger"
 import { usePOSEvents } from "@/composables/usePOSEvents"
+import { usePOSSettingsStore } from "@/stores/posSettings"
 import TranslatedHTML from "../common/TranslatedHTML.vue"
 
 const log = logger.create("POSSettings")
+const posSettingsStore = usePOSSettingsStore()
 const {
 	detectSettingsChanges,
 	updateSettingsSnapshot,

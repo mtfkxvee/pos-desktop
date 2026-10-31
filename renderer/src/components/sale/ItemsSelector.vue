@@ -1365,6 +1365,14 @@ async function handleBarcodeSearch(forceAutoAdd = false) {
 	const barcode = searchTerm.value.trim()
 	if (!barcode) return
 
+	// Scan only shows the item in the catalog; select the term so the next
+	// scan replaces it instead of appending to it
+	if (settingsStore.scanToCatalog) {
+		itemStore.searchItems(barcode, true)
+		searchInputRef.value?.select()
+		return
+	}
+
 	const shouldAutoAdd = forceAutoAdd || autoAddEnabled.value
 
 	try {

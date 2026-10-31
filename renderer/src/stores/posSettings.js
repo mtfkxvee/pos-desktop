@@ -3,6 +3,16 @@ import { defineStore } from "pinia"
 import { computed, ref } from "vue"
 import { useBootstrapStore } from "./bootstrap"
 
+const SCAN_TO_CATALOG_KEY = "pos_scan_to_catalog"
+
+function readScanToCatalog() {
+	try {
+		return localStorage.getItem(SCAN_TO_CATALOG_KEY) === "1"
+	} catch {
+		return false
+	}
+}
+
 const DEFAULT_SETTINGS = {
 	pos_profile: "",
 	enabled: 0,
@@ -264,6 +274,18 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		Boolean(settings.value.allow_negative_stock),
 	)
 
+	// Device-level (localStorage), not a POS Settings field: a barcode scan
+	// only shows the item in the catalog instead of adding it to the cart
+	const scanToCatalog = ref(readScanToCatalog())
+	function setScanToCatalog(enabled) {
+		scanToCatalog.value = Boolean(enabled)
+		try {
+			localStorage.setItem(SCAN_TO_CATALOG_KEY, scanToCatalog.value ? "1" : "0")
+		} catch {
+			// Storage unavailable - keep the in-memory value for this session
+		}
+	}
+
 	// Computed - Sales Persons
 	const enableSalesPersons = computed(
 		() => settings.value.enable_sales_persons !== "Disabled",
@@ -486,6 +508,8 @@ export const usePOSSettingsStore = defineStore("posSettings", () => {
 		// Computed - Miscellaneous
 		inputQty,
 		allowNegativeStock,
+		scanToCatalog,
+		setScanToCatalog,
 
 		// Computed - Sales Persons
 		enableSalesPersons,
