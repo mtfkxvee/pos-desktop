@@ -54,35 +54,97 @@ async function upsertInChunks(db, rows, upsertRow) {
   }
 }
 
-function maxModified(rows) {
-  return rows.reduce(
-    (max, r) => (r.modified && (!max || r.modified > max) ? r.modified : max),
-    null
+// --- Delta pulls (items, customers) -----------------------------------------
+//
+// The catalog and customer list are tens of thousands of rows each; pulling
+// both in full every sync cycle from every device kept the ERP database
+// permanently busy. pos_next.api.sync returns only what changed since the
+// server_time of the previous pull (item price/stock changes included), with
+// a full re-pull now and then to catch anything a delta can't see (e.g. the
+// profile's item groups changing).
+const FULL_PULL_INTERVAL_MS = 12 * 60 * 60 * 1000;
+// Servers that don't have pos_next.api.sync deployed yet only offer the full
+// pull, so at least don't run it every cycle.
+const LEGACY_PULL_INTERVAL_MS = 10 * 60 * 1000;
+const DELTA_RECHECK_MS = 60 * 60 * 1000;
+let deltaMissingAt = 0;
+
+function isMissingMethod(err) {
+  return /Failed to get method|No module named|has no attribute|not whitelisted|HTTP 404/i.test(
+    err?.message || ""
   );
 }
 
-// --- Incremental pulls (support modified_after) -----------------------------
+function syncedAgo(state) {
+  return state?.last_synced_at ? Date.now() - Date.parse(state.last_synced_at) : Infinity;
+}
 
-async function pullItems(posProfile) {
-  const state = getSyncState("items");
-  const items = await callMethod("pos_next.api.items.get_items_bulk", {
-    pos_profile: posProfile,
-    modified_after: state?.last_modified || null,
-    start: 0,
-    limit: 100000,
-    // Real get_items/get_items_bulk exclude variant SKUs by default (they're
-    // meant to stay hidden from the main catalog, surfaced only via the
-    // template's variant-picker dialog) — but that dialog's OWN offline
-    // fallback (ItemSelectionDialog.vue's getCachedVariants) reads from this
-    // SAME local items cache. Without include_variants here, variants were
-    // never cached at all: the variant picker would silently show zero
-    // options offline, leaving the cashier unable to add that item to the
-    // cart. rpc.js's get_items/get_items_bulk cache-first handlers filter
-    // variants back out for normal catalog browsing, matching real backend
-    // default behavior — this flag only controls what gets STORED locally.
-    include_variants: 1,
-  });
-  const rows = items || [];
+// Returns { rows, serverTime, isFull }, or null when the legacy full pull was
+// skipped for being too recent. `<table>:full` remembers when and for which
+// profile the last full pull ran — switching profile needs a full one too.
+// `forceFull` is the manual Sync button: always pull everything, right now.
+async function fetchChangedRows(table, deltaMethod, key, posProfile, legacyFetch, forceFull) {
+  const state = getSyncState(table);
+  if (Date.now() - deltaMissingAt > DELTA_RECHECK_MS) {
+    const full = getSyncState(`${table}:full`);
+    const isFull =
+      forceFull ||
+      !state?.last_modified ||
+      full?.last_modified !== posProfile ||
+      syncedAgo(full) > FULL_PULL_INTERVAL_MS;
+    try {
+      const res = await callMethod(deltaMethod, {
+        pos_profile: posProfile,
+        since: isFull ? null : state.last_modified,
+      });
+      return { rows: res?.[key] || [], serverTime: res?.server_time || null, isFull };
+    } catch (err) {
+      if (!isMissingMethod(err)) throw err;
+      deltaMissingAt = Date.now();
+    }
+  }
+  if (!forceFull && syncedAgo(state) < LEGACY_PULL_INTERVAL_MS) return null;
+  return { rows: (await legacyFetch()) || [], serverTime: null, isFull: true };
+}
+
+// Only after the rows are stored — a failed upsert must not advance `since`.
+// A legacy pull leaves last_modified empty, so the next delta pull is full.
+function saveSyncState(table, posProfile, { serverTime, isFull }) {
+  const now = new Date().toISOString();
+  setSyncState(table, { lastModified: serverTime, lastSyncedAt: now });
+  if (serverTime && isFull) {
+    setSyncState(`${table}:full`, { lastModified: posProfile, lastSyncedAt: now });
+  }
+}
+
+async function pullItems(posProfile, { full = false } = {}) {
+  const fetched = await fetchChangedRows(
+    "items",
+    "pos_next.api.sync.get_items_delta",
+    "items",
+    posProfile,
+    () =>
+      callMethod("pos_next.api.items.get_items_bulk", {
+        pos_profile: posProfile,
+        start: 0,
+        limit: 100000,
+        // Real get_items/get_items_bulk exclude variant SKUs by default (they're
+        // meant to stay hidden from the main catalog, surfaced only via the
+        // template's variant-picker dialog) — but that dialog's OWN offline
+        // fallback (ItemSelectionDialog.vue's getCachedVariants) reads from this
+        // SAME local items cache. Without include_variants here, variants were
+        // never cached at all: the variant picker would silently show zero
+        // options offline, leaving the cashier unable to add that item to the
+        // cart. rpc.js's get_items/get_items_bulk cache-first handlers filter
+        // variants back out for normal catalog browsing, matching real backend
+        // default behavior — this flag only controls what gets STORED locally.
+        // (get_items_delta always includes variants for the same reason.)
+        include_variants: 1,
+      }),
+    full
+  );
+  if (!fetched) return { skipped: true };
+  const rows = fetched.rows;
 
   const db = getDb();
   const upsert = db.prepare(`
@@ -109,22 +171,26 @@ async function pullItems(posProfile) {
   );
   if (rows.length) refreshSearch("items", rows.map((r) => r.item_code));
 
-  setSyncState("items", {
-    lastModified: maxModified(rows) || state?.last_modified || null,
-    lastSyncedAt: new Date().toISOString(),
-  });
-  return { count: rows.length };
+  saveSyncState("items", posProfile, fetched);
+  return { count: rows.length, full: fetched.isFull };
 }
 
-async function pullCustomers(posProfile) {
-  const state = getSyncState("customers");
-  const customers = await callMethod("pos_next.api.customers.get_customers", {
-    pos_profile: posProfile,
-    modified_after: state?.last_modified || null,
-    start: 0,
-    limit: 100000,
-  });
-  const rows = customers || [];
+async function pullCustomers(posProfile, { full = false } = {}) {
+  const fetched = await fetchChangedRows(
+    "customers",
+    "pos_next.api.sync.get_customers_delta",
+    "customers",
+    posProfile,
+    () =>
+      callMethod("pos_next.api.customers.get_customers", {
+        pos_profile: posProfile,
+        start: 0,
+        limit: 100000,
+      }),
+    full
+  );
+  if (!fetched) return { skipped: true };
+  const rows = fetched.rows;
 
   const db = getDb();
   const upsert = db.prepare(`
@@ -170,11 +236,8 @@ async function pullCustomers(posProfile) {
   if (purged.changes) invalidateSearch("customers");
   else if (rows.length) refreshSearch("customers", rows.map((r) => r.name));
 
-  setSyncState("customers", {
-    lastModified: maxModified(rows) || state?.last_modified || null,
-    lastSyncedAt: new Date().toISOString(),
-  });
-  return { count: rows.length };
+  saveSyncState("customers", posProfile, fetched);
+  return { count: rows.length, full: fetched.isFull };
 }
 
 // --- Full-refetch pulls (endpoints with no modified_after support) --------

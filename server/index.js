@@ -231,7 +231,9 @@ function startServer({ port = 8871, dbPath } = {}) {
       return res.status(400).json({ error: "Device belum ter-setup (POS Profile tidak ditemukan)" });
     }
     try {
-      const result = await puller(getActivePosProfile(device));
+      // Manual sync pulls items/customers in full (other pullers ignore it) —
+      // the way to repair a catalog that's missing something
+      const result = await puller(getActivePosProfile(device), { full: true });
       res.json({ online: true, result });
     } catch (err) {
       res.status(502).json({ online: true, error: err.message });
