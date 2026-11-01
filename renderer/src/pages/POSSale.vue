@@ -2317,6 +2317,26 @@ async function handleErrorRetry() {
  * Save the current cart as an offline invoice (queued for sync), print/show
  * success, and clear the cart. Used for the normal offline checkout flow.
  */
+// Deleting a draft takes a row lock on tabSeries that every checkout shares,
+// so it can lose to a lock timeout under load. Retry in the background with a
+// growing, jittered delay instead of failing silently and orphaning the draft
+// (the server also sweeps leftover drafts on a schedule).
+async function deleteServerDraftWithRetry(draftName, attempts = 3) {
+	for (let i = 0; i < attempts; i++) {
+		try {
+			await call("pos_next.api.invoices.delete_invoice", { invoice: draftName });
+			return true;
+		} catch (e) {
+			if (i === attempts - 1) {
+				log.warn("Failed to delete server draft " + draftName, e);
+				return false;
+			}
+			await new Promise((r) => setTimeout(r, 3000 * (i + 1) + Math.random() * 1500));
+		}
+	}
+	return false;
+}
+
 async function saveCurrentTransactionOffline(paymentData, customerValue, draftIdToDelete) {
 	// Use the same item transformation as online flow for consistency
 	// This ensures rate, discount_percentage, discount_amount, and pricing_rules
@@ -2397,8 +2417,7 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 	// Delete draft after successful save
 	if (draftIdToDelete) {
 		if (cartStore.currentDraftIsServer && !offlineStore.isOffline) {
-			call("pos_next.api.invoices.delete_invoice", { invoice: draftIdToDelete })
-				.catch(e => log.warn("Failed to delete server draft after checkout", e));
+			deleteServerDraftWithRetry(draftIdToDelete);
 		} else {
 			draftsStore.deleteDraft(draftIdToDelete);
 		}
@@ -2776,8 +2795,7 @@ async function handleSaveDraft() {
 					// Optional: Delete local draft if we were continuing from one
 					if (cartStore.currentDraftId) {
 						if (cartStore.currentDraftIsServer && !offlineStore.isOffline) {
-							await call("pos_next.api.invoices.delete_invoice", { invoice: cartStore.currentDraftId })
-								.catch(e => log.warn("Failed to delete replacing server draft", e));
+							deleteServerDraftWithRetry(cartStore.currentDraftId);
 						} else {
 							draftsStore.deleteDraft(cartStore.currentDraftId);
 						}
@@ -2858,8 +2876,7 @@ async function handleLoadDraft(draft) {
 					if (draftInvoice && (draftInvoice.name || draftInvoice.data?.name)) {
 						if (cartStore.currentDraftId) {
 							if (cartStore.currentDraftIsServer && !offlineStore.isOffline) {
-								await call("pos_next.api.invoices.delete_invoice", { invoice: cartStore.currentDraftId })
-									.catch(e => log.warn("Failed to delete replacing server draft", e));
+								deleteServerDraftWithRetry(cartStore.currentDraftId);
 							} else {
 								draftsStore.deleteDraft(cartStore.currentDraftId);
 							}

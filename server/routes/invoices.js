@@ -12,13 +12,17 @@ function generateOfflineId(outletCode) {
   return `OFFLINE-${outletCode || "UNKNOWN"}-${crypto.randomUUID()}`;
 }
 
-function queueInvoiceLocally({ invoice, data, device }) {
+function queueInvoiceLocally({ invoice, data, device, draftName }) {
   markCheckoutActivity();
   const offlineId = generateOfflineId(device?.outletCode);
   const db = getDb();
   const now = new Date().toISOString();
   const payload = {
-    invoice: { ...invoice, offline_id: offlineId },
+    // draftName: draft already created on the server by a failed online
+    // attempt. Carrying it into the queue lets submit_invoice reuse that
+    // draft instead of update_invoice creating a second one (which left the
+    // first orphaned and piled up drafts that then contended on tabSeries).
+    invoice: { ...invoice, offline_id: offlineId, ...(draftName ? { name: draftName } : {}) },
     data: data || {},
   };
   db.prepare(
@@ -41,11 +45,12 @@ router.post("/", async (req, res) => {
   const online = await pingServer();
 
   if (online) {
+    let draftName;
     try {
       const draft = await callMethod("pos_next.api.invoices.update_invoice", {
         data: JSON.stringify(invoice),
       });
-      const draftName = draft?.name || invoice.name;
+      draftName = draft?.name || invoice.name;
       const submitted = await callMethod("pos_next.api.invoices.submit_invoice", {
         data: JSON.stringify({ invoice: { ...invoice, name: draftName }, data: data || {} }),
       });
@@ -55,7 +60,7 @@ router.post("/", async (req, res) => {
         sales_invoice: submitted?.name || submitted?.message,
       });
     } catch (err) {
-      const offlineId = queueInvoiceLocally({ invoice, data, device });
+      const offlineId = queueInvoiceLocally({ invoice, data, device, draftName });
       return res.json({
         ok: true,
         online: false,

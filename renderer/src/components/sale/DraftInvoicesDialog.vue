@@ -207,7 +207,7 @@ const draftsResource = createResource({
 })
 
 const deleteResource = createResource({
-	url: "frappe.client.delete",
+	url: "pos_next.api.invoices.delete_invoice",
 	auto: false,
 })
 
@@ -288,8 +288,7 @@ async function confirmDeleteDraft() {
 	try {
 		if (draftToDelete.value.is_server && !offlineStore.isOffline) {
 			await deleteResource.submit({
-				doctype: "Sales Invoice",
-				name: draftToDelete.value.draft_id,
+				invoice: draftToDelete.value.draft_id,
 			})
 		} else {
 			await deleteDraft(draftToDelete.value.draft_id)
