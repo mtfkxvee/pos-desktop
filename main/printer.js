@@ -447,6 +447,14 @@ async function printShiftClosing(closingData, config) {
   printer.bold(false);
   sep("=");
 
+  if (closingData.jenis_catatan || closingData.deskripsi_catatan) {
+    title("CATATAN SHIFT");
+    if (closingData.jenis_catatan) printer.println(closingData.jenis_catatan);
+    const desc = String(closingData.deskripsi_catatan || "").trim();
+    if (desc) printer.println(desc);
+    sep("=");
+  }
+
   printer.alignCenter();
   printer.println(fmtDateTime(now));
   printer.cut();

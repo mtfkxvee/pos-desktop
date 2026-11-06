@@ -261,6 +261,39 @@
             </div>
           </div>
 
+          <!-- Shift Note (custom fields jenis_catatan / deskripsi_catatan on POS Closing Shift) -->
+          <div v-if="noteTypeOptions.length" class="bg-white border border-gray-200 rounded-lg p-3 md:p-4 shadow-sm flex flex-col gap-3">
+            <div>
+              <h3 class="text-start text-sm md:text-base font-semibold text-gray-900">{{ __('Catatan Shift') }}</h3>
+              <p class="text-start text-xs text-gray-500">{{ __('Ceritakan kejadian selama shift ini, kalau ada.') }}</p>
+            </div>
+            <div class="flex flex-col gap-1">
+              <label for="shift-note-type" class="text-start text-xs font-medium text-gray-700">{{ __('Jenis') }}</label>
+              <select
+                id="shift-note-type"
+                v-model="closingData.jenis_catatan"
+                :disabled="submitResource.loading || showSuccessReport"
+                class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
+              >
+                <option v-for="opt in noteTypeOptions" :key="opt" :value="opt">{{ opt }}</option>
+              </select>
+            </div>
+            <div class="flex flex-col gap-1">
+              <label for="shift-note-desc" class="text-start text-xs font-medium text-gray-700">
+                {{ __('Deskripsi') }}
+                <span v-if="noteDescriptionRequired" class="text-red-600">*</span>
+              </label>
+              <textarea
+                id="shift-note-desc"
+                v-model="closingData.deskripsi_catatan"
+                rows="3"
+                :placeholder="noteDescriptionRequired ? __('Wajib diisi: jelaskan kejadiannya') : __('Opsional')"
+                :disabled="submitResource.loading || showSuccessReport"
+                class="w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 focus:border-blue-500 focus:outline-none disabled:bg-gray-100 resize-y"
+              />
+            </div>
+          </div>
+
           <!-- Payment Reconciliation -->
           <div class="bg-white border border-gray-200 rounded-lg overflow-hidden shadow-sm">
             <div :class="[
@@ -544,7 +577,7 @@
         <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3 order-1 sm:order-2">
           <!-- Validation Warning (only in entry mode) -->
           <div v-if="!canSubmit && closingData && !showSuccessReport" class="text-xs md:text-sm text-yellow-600 font-medium text-center sm:text-end">
-            {{ __('Isi semua nominal closing') }}
+            {{ noteMissing ? __('Isi deskripsi catatan shift') : __('Isi semua nominal closing') }}
           </div>
 
           <!-- Success message (shown in report view) -->
@@ -611,6 +644,7 @@ import { usePOSSyncStore } from "../stores/posSync"
 import TranslatedHTML from "./common/TranslatedHTML.vue"
 import { printShiftClosing } from "@/utils/printInvoice"
 import { usePrintFormat } from "@/composables/usePrintFormat"
+import { call } from "@/utils/apiWrapper"
 
 const props = defineProps({
 	modelValue: {
@@ -674,6 +708,44 @@ const showIdleWarning = ref(false)
 const showVisitorConfirm = ref(false)
 let _idleWarningTimer = null
 
+// Shift note: the options and default for "Jenis" are read from the ERP's
+// own field definition each time the dialog opens (closing is online-only
+// anyway), so editing the Select options in the ERP needs no app release.
+// If the field doesn't exist on POS Closing Shift the section stays hidden —
+// sending it would be silently dropped by the server anyway.
+const NOTE_DOCTYPE = "POS Closing Shift"
+const noteTypeOptions = ref([])
+const noteTypeDefault = ref("")
+
+async function loadNoteFieldMeta() {
+	try {
+		const res = await call("frappe.desk.form.load.getdoctype", { doctype: NOTE_DOCTYPE })
+		const meta = (res?.docs || []).find((d) => d.name === NOTE_DOCTYPE)
+		const field = meta?.fields?.find((f) => f.fieldname === "jenis_catatan")
+		noteTypeOptions.value = (field?.options || "")
+			.split("\n")
+			.map((o) => o.trim())
+			.filter(Boolean)
+		noteTypeDefault.value = field?.default || noteTypeOptions.value[0] || ""
+	} catch (error) {
+		console.error("Error loading shift note field:", error)
+		noteTypeOptions.value = []
+		noteTypeDefault.value = ""
+	}
+}
+
+// Anything other than the default ("Normal ...") means something happened,
+// so the cashier has to say what.
+const noteDescriptionRequired = computed(
+	() =>
+		noteTypeOptions.value.length > 0 &&
+		!!closingData.value?.jenis_catatan &&
+		closingData.value.jenis_catatan !== noteTypeDefault.value,
+)
+const noteMissing = computed(
+	() => noteDescriptionRequired.value && !String(closingData.value?.deskripsi_catatan || "").trim(),
+)
+
 // Watch dialog open state
 watch(open, async (isOpen) => {
 	if (isOpen && props.openingShift) {
@@ -712,9 +784,17 @@ async function loadClosingData() {
 	try {
 		errorMessage.value = "" // Clear any previous errors
 
-		const data = await closingDataResource.submit({
-			opening_shift: props.openingShift,
-		})
+		const [data] = await Promise.all([
+			closingDataResource.submit({ opening_shift: props.openingShift }),
+			loadNoteFieldMeta(),
+		])
+
+		if (noteTypeOptions.value.length) {
+			if (!noteTypeOptions.value.includes(data.jenis_catatan)) {
+				data.jenis_catatan = noteTypeDefault.value
+			}
+			data.deskripsi_catatan = data.deskripsi_catatan || ""
+		}
 
 		// Make payment_reconciliation reactive
 		if (data.payment_reconciliation) {
@@ -790,6 +870,7 @@ const canSubmit = computed(() => {
 	const active = closingData.value.payment_reconciliation.filter(
 		(p) => p.mode_of_payment && (p.opening_amount > 0 || p.expected_amount > 0),
 	)
+	if (noteMissing.value) return false
 	if (active.length === 0) return true
 
 	return active.every(
