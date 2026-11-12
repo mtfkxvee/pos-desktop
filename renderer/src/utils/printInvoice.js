@@ -72,6 +72,15 @@ export async function printInvoiceByName(invoiceName, printFormat = null, letter
     })
     if (!invoiceDoc) throw new Error("Invoice tidak ditemukan")
 
+    // ERPNext stores an item's discount_amount per unit; the receipt prints
+    // it as the line total (the cart's format, used by the print right after
+    // payment). Convert so both prints show the same discount.
+    invoiceDoc.items = (invoiceDoc.items || []).map((item) => {
+      const qty = Number(item.qty ?? item.quantity) || 0
+      const perUnit = Number(item.discount_amount) || 0
+      return perUnit > 0 ? { ...item, discount_amount: perUnit * qty } : item
+    })
+
     if (invoiceDoc.loyalty_program) {
       try {
         const loyaltyData = await call("pos_next.api.invoices.get_invoice_loyalty_points", {

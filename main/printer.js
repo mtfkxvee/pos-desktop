@@ -274,7 +274,10 @@ async function printReceipt(invoiceData, companyAddress, config) {
   if (invoiceData.customer_code) printer.println(`Kode Pel: ${invoiceData.customer_code}`);
   printer.drawLine();
 
-  // ── Items ── (price_list_rate, not rate — matches what the format prints)
+  // ── Items ── (price_list_rate, not rate — matches what the format prints).
+  // price_list_rate already includes any Pricing Rule margin (the cart raises
+  // it), so the receipt shows the raised price as the price — the margin is
+  // never printed as its own line. A discount is printed under the item.
   for (const item of invoiceData.items || []) {
     const qty = item.qty ?? item.quantity ?? 0;
     const rate = item.price_list_rate ?? item.rate ?? 0;
@@ -282,8 +285,11 @@ async function printReceipt(invoiceData, companyAddress, config) {
     printer.println(item.item_name || item.item_code);
     const qtyDisplay = Number.isInteger(qty) ? qty : qty;
     printer.leftRight(`${qtyDisplay} x ${num(rate)}`, num(baseAmount));
+    // discount_amount is the LINE total here (the cart's format). A doc
+    // fetched from ERPNext carries it per unit — printInvoiceByName converts
+    // it before it gets here.
     if (item.discount_amount > 0) {
-      printer.leftRight("  Diskon", `-${num(item.discount_amount * qty)}`);
+      printer.leftRight("  Diskon", `-${num(item.discount_amount)}`);
     }
     if (item.serial_no) {
       printer.println(`S/N: ${String(item.serial_no).replace(/\n/g, ", ")}`);
