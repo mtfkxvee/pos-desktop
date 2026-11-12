@@ -166,10 +166,17 @@ export const usePOSOffersStore = defineStore("posOffers", () => {
 				return { eligible: false, reason: "Offer has no free quantity configured" }
 			}
 		} else {
+			// A rule may carry only a margin (it raises the price instead of
+			// discounting it) — that is a real effect too, on item-level rules.
+			const hasMargin =
+				offer?.apply_on !== "Transaction" &&
+				(offer?.margin_type === "Percentage" || offer?.margin_type === "Amount") &&
+				Number(offer?.margin_rate_or_amount) > 0
 			const hasRealDiscount =
 				Number(offer?.discount_percentage) > 0 ||
 				Number(offer?.discount_amount) > 0 ||
-				Number(offer?.rate) > 0
+				Number(offer?.rate) > 0 ||
+				hasMargin
 			if (!hasRealDiscount) {
 				return { eligible: false, reason: "Offer has no discount value configured" }
 			}
