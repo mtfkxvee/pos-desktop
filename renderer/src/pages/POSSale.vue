@@ -584,9 +584,10 @@
 				:customer="cartStore.customer?.name || cartStore.customer"
 				:company="shiftStore.profileCompany"
 				:currency="shiftStore.profileCurrency"
-				:applied-coupon="cartStore.appliedCoupon"
-				@discount-applied="handleDiscountApplied"
-				@discount-removed="handleDiscountRemoved"
+				:applied-coupons="cartStore.appliedCoupons"
+				:coupon-total="cartStore.couponDiscountAmount"
+				@coupon-applied="cartStore.addCoupon"
+				@coupon-removed="cartStore.removeCoupon"
 			/>
 
 			<!-- Offers Dialog -->
@@ -2364,9 +2365,9 @@ async function saveCurrentTransactionOffline(paymentData, customerValue, draftId
 		discount_amount: (cartStore.additionalDiscount || 0) + _offlinePromoDiscount,
 		promo_discount_amount: _offlinePromoDiscount,
 		apply_discount_on: "Grand Total",
-		coupon_code: (cartStore.appliedCoupon && !cartStore.appliedCoupon.is_manual && cartStore.appliedCoupon.code !== 'MANUAL' && cartStore.appliedCoupon.code !== 'COMPLIMENT')
-			? (cartStore.appliedCoupon.code || cartStore.appliedCoupon.name)
-			: undefined,
+		// Every stacked POS Coupon (pos_coupons), plus coupon_code /
+		// coupon_discount_amount for the first one and the total.
+		...cartStore.couponPayload(),
 		write_off_amount: paymentData.write_off_amount || 0,
 		redeem_loyalty_points: paymentData.redeem_loyalty_points || 0,
 		loyalty_points: paymentData.loyalty_points || 0,
@@ -2777,7 +2778,7 @@ async function handleSaveDraft() {
 					customer: cartStore.customer?.name || cartStore.customer,
 					items: cartStore.formatItemsForSubmission(toRaw(cartStore.invoiceItems)),
 					discount_amount: cartStore.additionalDiscount || 0,
-					coupon_code: cartStore.appliedCoupon?.code || cartStore.appliedCoupon?.name || undefined,
+					...cartStore.couponPayload(),
 					is_pos: 1,
 					docstatus: 0, // Save as Draft
 					update_stock: 0, // Do NOT update stock for draft!
@@ -2826,10 +2827,11 @@ async function handleSaveDraft() {
 				{
 					additionalDiscount: cartStore.additionalDiscount,
 					appliedCoupon: cartStore.appliedCoupon,
+					appliedCoupons: cartStore.appliedCoupons,
 					loyaltyData: cartStore.loyaltyData
 				}
 			);
-			
+
 			if (savedDraft) {
 				showSuccess(__("Invoice saved as draft locally"));
 				cartStore.clearCart();
@@ -2861,7 +2863,7 @@ async function handleLoadDraft(draft) {
 						customer: cartStore.customer?.name || cartStore.customer,
 						items: cartStore.formatItemsForSubmission(toRaw(cartStore.invoiceItems)),
 						discount_amount: cartStore.additionalDiscount || 0,
-						coupon_code: cartStore.appliedCoupon?.code || cartStore.appliedCoupon?.name || undefined,
+						...cartStore.couponPayload(),
 						is_pos: 1,
 						docstatus: 0,
 						update_stock: 0,
@@ -2899,6 +2901,7 @@ async function handleLoadDraft(draft) {
 					{
 						additionalDiscount: cartStore.additionalDiscount,
 						appliedCoupon: cartStore.appliedCoupon,
+						appliedCoupons: cartStore.appliedCoupons,
 						loyaltyData: cartStore.loyaltyData
 					}
 				);
@@ -2972,7 +2975,7 @@ async function handleLoadDraft(draft) {
 		
 		// Restore additional state
 		cartStore.additionalDiscount = draftData.additionalDiscount || 0;
-		cartStore.appliedCoupon = draftData.appliedCoupon || null;
+		cartStore.restoreCoupons(draftData);
 		if (draftData.loyaltyData && Object.keys(draftData.loyaltyData).length > 0) {
 			cartStore.setLoyaltyData(draftData.loyaltyData);
 		}
@@ -3007,15 +3010,6 @@ async function handleLoadDraft(draft) {
 function handleReturnCreated(returnInvoice) {
 	// Success message is already shown by ReturnInvoiceDialog
 	log.debug("Return invoice created:", returnInvoice.name)
-}
-
-function handleDiscountApplied(discount) {
-	cartStore.applyDiscountToCart(discount);
-	uiStore.showCouponDialog = false;
-}
-
-function handleDiscountRemoved() {
-	cartStore.removeDiscountFromCart();
 }
 
 async function handleApplyOffer(offer) {

@@ -157,7 +157,11 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	const pendingItem = ref(null)
 	const pendingItemQty = ref(1)
 	const appliedOffers = ref([])
+	// The manual discount (code "MANUAL"); POS Coupons live in appliedCoupons.
 	const appliedCoupon = ref(null)
+	// POS Coupons stacked on this transaction, in the order applied:
+	// [{ code, name, type, percentage, value, max_amount, min_amount, apply_on, amount }]
+	const appliedCoupons = ref([])
 	const appliedCompliment = ref(null)
 	// Keep the compliment reason in sync for submission - sent to the backend
 	// as custom_compliment_reason so it's stored on the Sales Invoice
@@ -341,6 +345,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		customer.value = null
 		appliedOffers.value = []
 		appliedCoupon.value = null
+		appliedCoupons.value = []
 		appliedCompliment.value = null
 		manualDiscountAmount.value = 0
 		complimentDiscountAmount.value = 0
@@ -513,7 +518,147 @@ export const usePOSCartStore = defineStore("posCart", () => {
 	}
 
 	// Discount & Offer Management
+
+	/** A discount object that is a POS Coupon (not the manual discount or a compliment). */
+	function isPosCoupon(discount) {
+		return (
+			!!discount &&
+			!discount.is_manual &&
+			discount.code !== "MANUAL" &&
+			discount.code !== "COMPLIMENT"
+		)
+	}
+
+	/**
+	 * Work out each stacked coupon's discount, in the order they were applied:
+	 * every coupon takes from what the coupons before it left of the subtotal
+	 * (10% + 10% on 100.000 = 10.000 + 9.000), within its own Maximum Discount.
+	 */
+	function computeCouponAmounts(coupons, base) {
+		let remaining = Math.max(0, Number(base) || 0)
+		return coupons.map((coupon) => {
+			let amount =
+				coupon.type === "Percentage"
+					? (remaining * (Number(coupon.percentage) || 0)) / 100
+					: Number(coupon.value) || 0
+			const max = Number(coupon.max_amount) || 0
+			if (max > 0) amount = Math.min(amount, max)
+			amount = roundCurrency(Math.max(0, Math.min(amount, remaining)))
+			remaining = roundCurrency(remaining - amount)
+			return { ...coupon, amount }
+		})
+	}
+
+	const couponDiscountAmount = computed(() =>
+		roundCurrency(appliedCoupons.value.reduce((sum, c) => sum + (Number(c.amount) || 0), 0)),
+	)
+
+	/**
+	 * Recalculate the stacked coupons against the current subtotal and move
+	 * the difference into additionalDiscount, leaving the manual discount and
+	 * compliment parts of it alone. A coupon whose minimum purchase the cart
+	 * no longer meets is taken off.
+	 */
+	function refreshCouponDiscounts() {
+		const before = couponDiscountAmount.value
+		const base = subtotal.value || 0
+		const kept = appliedCoupons.value.filter((c) => {
+			const min = Number(c.min_amount) || 0
+			if (min > 0 && base < min) {
+				showWarning(__("Kupon {0} dilepas: belanja di bawah minimum", [c.code]))
+				return false
+			}
+			return true
+		})
+		appliedCoupons.value = computeCouponAmounts(kept, base)
+		const delta = couponDiscountAmount.value - before
+		if (delta !== 0) {
+			additionalDiscount.value = roundCurrency(
+				Math.min(Math.max(0, (additionalDiscount.value || 0) + delta), base),
+			)
+		}
+		rebuildIncrementalCache()
+	}
+
+	/** Add a validated POS Coupon on top of those already applied. */
+	function addCoupon(discount) {
+		const code = String(discount.code || "").toUpperCase()
+		if (!code) return false
+		if (appliedCoupons.value.some((c) => c.code === code)) {
+			showWarning(__("Kupon {0} sudah dipakai di transaksi ini", [code]))
+			return false
+		}
+		const coupon = discount.coupon || {}
+		appliedCoupons.value = [
+			...appliedCoupons.value,
+			{
+				code,
+				name: discount.name || code,
+				type: discount.type || coupon.discount_type,
+				percentage: Number(discount.percentage ?? coupon.discount_percentage) || 0,
+				value: Number(coupon.discount_amount) || 0,
+				max_amount: Number(coupon.max_amount) || 0,
+				min_amount: Number(coupon.min_amount) || 0,
+				apply_on: discount.apply_on || coupon.apply_on,
+				amount: 0,
+			},
+		]
+		refreshCouponDiscounts()
+		const added = appliedCoupons.value.find((c) => c.code === code)
+		if (added) showSuccess(__("{0} applied successfully", [code]))
+		return !!added
+	}
+
+	function removeCoupon(code) {
+		appliedCoupons.value = appliedCoupons.value.filter((c) => c.code !== code)
+		refreshCouponDiscounts()
+	}
+
+	/** Coupon fields for an invoice payload: every coupon plus the older single-coupon fields. */
+	function couponPayload() {
+		const coupons = appliedCoupons.value
+		return {
+			coupon_code: coupons[0]?.code || undefined,
+			coupon_discount_amount: couponDiscountAmount.value || 0,
+			pos_coupons: coupons.map((c) => ({ coupon_code: c.code, discount_amount: c.amount })),
+		}
+	}
+
+	/**
+	 * Restore coupon state from a draft. A draft saved before coupons could be
+	 * stacked kept its coupon in appliedCoupon (shared with the manual discount).
+	 */
+	function restoreCoupons({ appliedCoupon: single, appliedCoupons: list } = {}) {
+		if (Array.isArray(list) && list.length) {
+			appliedCoupons.value = list
+			appliedCoupon.value = isPosCoupon(single) ? null : single || null
+		} else if (isPosCoupon(single)) {
+			appliedCoupons.value = [
+				{
+					code: String(single.code || single.name).toUpperCase(),
+					name: single.name,
+					type: single.type,
+					percentage: Number(single.percentage) || 0,
+					value: Number(single.coupon?.discount_amount) || 0,
+					max_amount: Number(single.coupon?.max_amount) || 0,
+					min_amount: Number(single.coupon?.min_amount) || 0,
+					apply_on: single.apply_on,
+					amount: Number(single.amount) || 0,
+				},
+			]
+			appliedCoupon.value = null
+		} else {
+			appliedCoupons.value = []
+			appliedCoupon.value = single || null
+		}
+	}
+
 	function applyDiscountToCart(discount) {
+		if (isPosCoupon(discount)) {
+			addCoupon(discount)
+			return
+		}
+
 		const isCompliment = discount.code === "COMPLIMENT"
 		const amount = calculateDiscountAmount(discount, subtotal.value)
 
@@ -525,8 +670,9 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			appliedCoupon.value = discount
 		}
 
-		// Stack both amounts
-		const combined = manualDiscountAmount.value + complimentDiscountAmount.value
+		// Stack the manual discount, compliment and coupons
+		const combined =
+			manualDiscountAmount.value + complimentDiscountAmount.value + couponDiscountAmount.value
 		additionalDiscount.value = Math.min(combined, subtotal.value)
 		rebuildIncrementalCache()
 
@@ -541,10 +687,17 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		complimentDiscountAmount.value = 0
 		promoTransactionDiscount.value = 0
 		appliedCoupon.value = null
+		appliedCoupons.value = []
 		appliedCompliment.value = null
 		rebuildIncrementalCache()
 		showSuccess(__("Discount has been removed from cart"))
 	}
+
+	// A percentage coupon follows the cart: re-price the stacked coupons
+	// whenever the subtotal changes (items added, removed, promos re-applied).
+	watch(subtotal, () => {
+		if (appliedCoupons.value.length) refreshCouponDiscounts()
+	})
 
 	function buildOfferEvaluationPayload(currentProfile) {
 		// Use toRaw() to ensure we get current, non-reactive values (prevents stale cached quantities)
@@ -563,13 +716,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 			selling_price_list: currentProfile?.selling_price_list,
 			currency: currentProfile?.currency,
 			discount_amount: additionalDiscount.value || 0,
-			coupon_code:
-				appliedCoupon.value &&
-				!appliedCoupon.value.is_manual &&
-				appliedCoupon.value.code !== "MANUAL" &&
-				appliedCoupon.value.code !== "COMPLIMENT"
-					? appliedCoupon.value.code || appliedCoupon.value.name
-					: "",
+			coupon_code: appliedCoupons.value[0]?.code || "",
 			// Offers are always evaluated on the list price: a margin a rule
 			// already added to the cart price is taken off again here, so the
 			// server never adds it on top of itself.
@@ -2559,6 +2706,7 @@ export const usePOSCartStore = defineStore("posCart", () => {
 				invoiceItems.value = []
 				appliedOffers.value = []
 				appliedCoupon.value = null
+				appliedCoupons.value = []
 				appliedCompliment.value = null
 				manualDiscountAmount.value = 0
 				complimentDiscountAmount.value = 0
@@ -2636,6 +2784,8 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		pendingItemQty,
 		appliedOffers,
 		appliedCoupon,
+		appliedCoupons,
+		couponDiscountAmount,
 		appliedCompliment,
 		manualDiscountAmount,
 		complimentDiscountAmount,
@@ -2669,6 +2819,10 @@ export const usePOSCartStore = defineStore("posCart", () => {
 		submitInvoice,
 		applyDiscountToCart,
 		removeDiscountFromCart,
+		addCoupon,
+		removeCoupon,
+		couponPayload,
+		restoreCoupons,
 		applyOffer,
 		removeOffer,
 		reapplyOffer,

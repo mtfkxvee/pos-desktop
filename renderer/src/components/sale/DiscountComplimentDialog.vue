@@ -92,11 +92,15 @@
 				</div>
 
 				<!-- Stacked discount summary -->
-				<div v-if="cartStore.appliedCoupon || cartStore.appliedCompliment" class="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 space-y-1 text-sm">
+				<div v-if="cartStore.appliedCoupon || cartStore.appliedCompliment || cartStore.appliedCoupons.length" class="rounded-lg bg-gray-50 border border-gray-200 px-4 py-3 space-y-1 text-sm">
 					<p class="font-medium text-gray-700 mb-1">{{ __('Applied') }}</p>
 					<div v-if="cartStore.appliedCoupon" class="flex justify-between text-gray-600">
 						<span>{{ __('Discount') }}</span>
 						<span class="font-semibold text-red-600">- {{ formatCurrency(cartStore.manualDiscountAmount) }}</span>
+					</div>
+					<div v-if="cartStore.appliedCoupons.length" class="flex justify-between text-gray-600">
+						<span>{{ __('Kupon ({0})', [cartStore.appliedCoupons.length]) }}</span>
+						<span class="font-semibold text-red-600">- {{ formatCurrency(cartStore.couponDiscountAmount) }}</span>
 					</div>
 					<div v-if="cartStore.appliedCompliment" class="flex justify-between text-gray-600">
 						<span>{{ __('Compliment') }}</span>
@@ -183,7 +187,7 @@ const complimentReason = ref("")
 const currencySymbol = computed(() => settingsStore.currencySymbol || "Rp")
 
 const hasAppliedDiscount = computed(() => {
-	return cartStore.additionalDiscount > 0 || cartStore.appliedCoupon || cartStore.appliedCompliment
+	return cartStore.additionalDiscount > 0 || cartStore.appliedCoupon || cartStore.appliedCompliment || cartStore.appliedCoupons.length > 0
 })
 
 const calculatedDiscountAmount = computed(() => {

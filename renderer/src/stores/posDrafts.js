@@ -107,6 +107,7 @@ export const usePOSDraftsStore = defineStore("posDrafts", () => {
 				applied_offers: draft.applied_offers || [], // Restore applied offers
 				additionalDiscount: draft.additionalDiscount || 0,
 				appliedCoupon: draft.appliedCoupon || null,
+				appliedCoupons: draft.appliedCoupons || [],
 				loyaltyData: draft.loyaltyData || {},
 			}
 		} catch (error) {

@@ -18,9 +18,9 @@
 				</div>
 
 				<!-- Coupon Code Input -->
-				<div v-if="!appliedDiscount">
+				<div>
 					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
-						{{ __('Coupon Code') }}
+						{{ appliedCoupons.length ? __('Tambah kupon lain') : __('Coupon Code') }}
 					</label>
 					<div class="flex gap-2">
 						<Input v-model="couponCode" type="text" :placeholder="__('ENTER-CODE-HERE')" class="flex-1 uppercase"
@@ -36,7 +36,7 @@
 				</div>
 
 				<!-- My Gift Cards -->
-				<div v-if="giftCards.length > 0 && !appliedDiscount">
+				<div v-if="availableGiftCards.length > 0">
 					<label class="block text-sm font-medium text-gray-700 mb-2 text-start">
 						<div class="flex items-center gap-2">
 							<svg class="w-4 h-4 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
@@ -45,11 +45,11 @@
 									d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z"
 									clip-rule="evenodd" />
 							</svg>
-							<span>{{ __('My Gift Cards ({0})', [giftCards.length]) }}</span>
+							<span>{{ __('My Gift Cards ({0})', [availableGiftCards.length]) }}</span>
 						</div>
 					</label>
 					<div class="flex flex-col gap-2 max-h-60 overflow-y-auto pe-1">
-						<div v-for="card in giftCards" :key="card.coupon_code" @click="applyGiftCard(card)"
+						<div v-for="card in availableGiftCards" :key="card.coupon_code" @click="applyGiftCard(card)"
 							class="bg-gradient-to-r from-purple-50 to-pink-50 border border-purple-200 rounded-lg p-3 cursor-pointer hover:shadow-md hover:border-purple-400 transition-all">
 							<div class="flex items-center justify-between">
 								<div class="flex-1">
@@ -82,31 +82,36 @@
 					</div>
 				</div>
 
-				<!-- Applied Coupon Preview -->
-				<div v-if="appliedDiscount" class="bg-green-50 border-2 border-green-500 rounded-lg p-4">
-					<div class="flex items-center gap-2 mb-3">
-						<div class="w-8 h-8 bg-green-100 rounded-full flex items-center justify-center">
-							<svg class="w-5 h-5 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-								<path fill-rule="evenodd"
-									d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
-									clip-rule="evenodd" />
-							</svg>
+				<!-- Applied Coupons (stacked, in the order applied) -->
+				<div v-if="appliedCoupons.length" class="bg-green-50 border-2 border-green-500 rounded-lg p-3">
+					<h4 class="text-sm font-bold text-green-900 mb-2 text-start">
+						{{ __('Kupon dipakai ({0})', [appliedCoupons.length]) }}
+					</h4>
+					<div class="flex flex-col gap-2">
+						<div v-for="c in appliedCoupons" :key="c.code"
+							class="bg-white rounded-lg px-3 py-2 flex items-center justify-between gap-2">
+							<div class="min-w-0 text-start">
+								<p class="text-sm font-bold text-gray-900 truncate">{{ c.code }}</p>
+								<p class="text-xs text-gray-500 truncate">
+									{{ c.type === 'Percentage' ? __('{0}% off', [c.percentage]) : formatCurrency(c.value) }}
+								</p>
+							</div>
+							<div class="flex items-center gap-2 flex-shrink-0">
+								<span class="text-sm font-bold text-green-600">-{{ formatCurrency(c.amount) }}</span>
+								<button type="button" @click="emit('coupon-removed', c.code)"
+									class="w-7 h-7 rounded-full flex items-center justify-center text-red-600 hover:bg-red-50"
+									:aria-label="__('Remove')">
+									<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+										<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+									</svg>
+								</button>
+							</div>
 						</div>
-						<h4 class="text-sm font-bold text-green-900">
-							{{ __('Coupon Applied Successfully!') }}
-						</h4>
 					</div>
-					<div class="bg-white rounded-lg p-3">
-						<div class="flex justify-between items-center mb-2">
-							<span class="text-xs text-gray-600">{{ __('Coupon Code') }}</span>
-							<span class="text-sm font-bold text-gray-900">{{ appliedDiscount.code }}</span>
-						</div>
-						<div class="flex justify-between items-center">
-							<span class="text-xs text-gray-600">{{ __('Discount Amount') }}</span>
-							<span class="text-lg font-bold text-green-600">
-								-{{ formatCurrency(appliedDiscount.amount) }}
-							</span>
-						</div>
+					<div v-if="appliedCoupons.length > 1"
+						class="flex justify-between items-center mt-2 pt-2 border-t border-green-200">
+						<span class="text-xs font-medium text-green-900">{{ __('Total diskon kupon') }}</span>
+						<span class="text-base font-bold text-green-700">-{{ formatCurrency(couponTotal) }}</span>
 					</div>
 				</div>
 
@@ -124,21 +129,10 @@
 			</div>
 		</template>
 		<template #actions>
-			<div class="flex justify-between items-center w-full gap-2">
-				<Button v-if="appliedDiscount" variant="subtle" theme="red" @click="removeDiscount" class="flex-shrink-0">
-					<template #prefix>
-						<svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-							<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-								d="M6 18L18 6M6 6l12 12" />
-						</svg>
-					</template>
-					{{ __('Remove') }}
+			<div class="flex justify-end items-center w-full gap-2">
+				<Button variant="subtle" @click="show = false">
+					{{ __('Close') }}
 				</Button>
-				<div class="flex gap-2 ms-auto">
-					<Button variant="subtle" @click="show = false">
-						{{ __('Close') }}
-					</Button>
-				</div>
 			</div>
 		</template>
 	</Dialog>
@@ -150,13 +144,10 @@ import {
 	formatCurrency as formatCurrencyUtil,
 } from "@/utils/currency"
 import { Button, Dialog, Input, createResource } from "frappe-ui"
-import { ref, watch } from "vue"
-import { useInvoice } from "@/composables/useInvoice"
+import { computed, ref, watch } from "vue"
 import { useToast } from "@/composables/useToast"
 
-// Get calculateDiscountAmount helper from composable
-const { calculateDiscountAmount } = useInvoice()
-const { showSuccess, showError, showWarning } = useToast()
+const { showError, showWarning } = useToast()
 
 const props = defineProps({
 	modelValue: Boolean,
@@ -173,24 +164,33 @@ const props = defineProps({
 		type: String,
 		default: DEFAULT_CURRENCY,
 	},
-	appliedCoupon: {
-		type: Object,
-		default: null,
+	// Coupons already on the cart, in the order applied (posCart.appliedCoupons)
+	appliedCoupons: {
+		type: Array,
+		default: () => [],
+	},
+	couponTotal: {
+		type: Number,
+		default: 0,
 	},
 })
 
 const emit = defineEmits([
 	"update:modelValue",
-	"discount-applied",
-	"discount-removed",
+	"coupon-applied",
+	"coupon-removed",
 ])
 
 const show = ref(props.modelValue)
 const couponCode = ref("")
 const giftCards = ref([])
-const appliedDiscount = ref(null)
 const applying = ref(false)
 const errorMessage = ref("")
+
+const availableGiftCards = computed(() => {
+	const used = new Set(props.appliedCoupons.map((c) => c.code))
+	return giftCards.value.filter((card) => !used.has(String(card.coupon_code).toUpperCase()))
+})
 
 // Resource to load gift cards
 const giftCardsResource = createResource({
@@ -207,13 +207,14 @@ const giftCardsResource = createResource({
 	},
 })
 
-// Resource to validate coupon
+// Resource to validate coupon. No customer = the POS sells to its walk-in
+// customer, which the server accepts.
 const couponResource = createResource({
 	url: "pos_next.api.offers.validate_coupon",
 	makeParams() {
 		return {
-			coupon_code: couponCode.value,
-			customer: props.customer,
+			coupon_code: couponCode.value.trim(),
+			customer: props.customer || "",
 			company: props.company,
 		}
 	},
@@ -228,8 +229,6 @@ watch(
 			loadGiftCards()
 			errorMessage.value = ""
 			couponCode.value = ""
-			// Sync with external state
-			appliedDiscount.value = props.appliedCoupon
 		}
 	},
 )
@@ -238,15 +237,8 @@ watch(show, (val) => {
 	emit("update:modelValue", val)
 })
 
-// Watch for external coupon removal
-watch(
-	() => props.appliedCoupon,
-	(val) => {
-		appliedDiscount.value = val
-	},
-)
-
 async function loadGiftCards() {
+	giftCards.value = []
 	if (!props.customer || !props.company) return
 	try {
 		await giftCardsResource.reload()
@@ -261,8 +253,14 @@ function applyGiftCard(card) {
 }
 
 async function applyCoupon() {
-	if (!couponCode.value.trim()) {
+	const code = couponCode.value.trim().toUpperCase()
+	if (!code) {
 		errorMessage.value = __("Masukkan kode kupon")
+		return
+	}
+	if (props.appliedCoupons.some((c) => c.code === code)) {
+		errorMessage.value = __("Kupon {0} sudah dipakai di transaksi ini", [code])
+		showWarning(errorMessage.value)
 		return
 	}
 
@@ -292,47 +290,26 @@ async function applyCoupon() {
 
 		// Check minimum amount (on subtotal before tax)
 		if (coupon.min_amount && props.subtotal < coupon.min_amount) {
-			errorMessage.value = __("This coupon requires a minimum purchase of ", [
+			errorMessage.value = __("Kupon ini butuh minimal belanja {0}", [
 				formatCurrency(coupon.min_amount),
 			])
 			showWarning(errorMessage.value)
 			return
 		}
 
-		// Calculate discount on subtotal (before tax) using centralized helper
-		// Transform server coupon format to discount object format
+		// The cart works out the amount: coupons stack, each taken from what
+		// the ones before it left (posCart.computeCouponAmounts).
 		const isPercentage = coupon.discount_type === "Percentage"
-		const discountObj = {
-			percentage: isPercentage ? coupon.discount_percentage : 0,
-			amount: isPercentage ? 0 : coupon.discount_amount,
-		}
-
-		let discountAmount = calculateDiscountAmount(discountObj, props.subtotal)
-
-		// Apply maximum discount limit if specified
-		if (coupon.max_amount && discountAmount > coupon.max_amount) {
-			discountAmount = coupon.max_amount
-		}
-
-		// Clamp discount to subtotal to prevent negative totals
-		discountAmount = Math.min(discountAmount, props.subtotal)
-
-		appliedDiscount.value = {
+		emit("coupon-applied", {
 			name: coupon.coupon_name || coupon.coupon_code,
-			code: couponCode.value.toUpperCase(),
+			code,
 			percentage: isPercentage ? coupon.discount_percentage || 0 : 0,
-			amount: discountAmount,
 			type: coupon.discount_type,
-			coupon: coupon,
+			coupon,
 			apply_on: coupon.apply_on,
-		}
+		})
 
-		emit("discount-applied", appliedDiscount.value)
-
-		showSuccess(
-			__("{0} applied successfully", [couponCode.value.toUpperCase()]),
-		)
-
+		couponCode.value = ""
 		errorMessage.value = ""
 	} catch (error) {
 		console.error("Error applying coupon:", error)
@@ -341,12 +318,6 @@ async function applyCoupon() {
 	} finally {
 		applying.value = false
 	}
-}
-
-function removeDiscount() {
-	appliedDiscount.value = null
-	emit("discount-removed")
-	showSuccess(__("Discount has been removed"))
 }
 
 function formatCurrency(amount) {
