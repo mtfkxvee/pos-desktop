@@ -3,6 +3,7 @@ const { refresh: refreshSearch } = require("../db/search-index");
 const { callMethod } = require("../frappe-client");
 const { pingServer } = require("./ping");
 const { pushQueuedShifts, resolveShiftName, isShiftPending } = require("./shifts");
+const { markInvoiceReachedServer, getLastInvoiceSyncedAt } = require("./lastInvoiceSync");
 
 const MAX_RETRY_COUNT = 3;
 const MAX_IN_PROGRESS_RETRIES = 3;
@@ -42,6 +43,7 @@ function markInvoiceSynced(row, salesInvoice) {
     `INSERT INTO invoice_id_map (offline_id, sales_invoice, synced_at) VALUES (?, ?, ?)
      ON CONFLICT(offline_id) DO UPDATE SET sales_invoice=excluded.sales_invoice, synced_at=excluded.synced_at`
   ).run(row.offline_id, salesInvoice, now);
+  markInvoiceReachedServer();
 }
 
 function handleSyncFailure(row, errorMessage) {
@@ -223,6 +225,8 @@ function getQueueStatus() {
   // Lets the renderer keep its sync indicator blinking for background
   // (scheduler) runs too, not just the manual click it started itself.
   counts.syncing = isPushRunning();
+  // Shift closing waits CLOSING_WAIT_MS after this (see lastInvoiceSync.js).
+  counts.lastSyncedAt = getLastInvoiceSyncedAt();
   return counts;
 }
 

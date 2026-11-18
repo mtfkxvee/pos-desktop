@@ -47,6 +47,19 @@
             </span>
           </div>
 
+          <!-- Post-sync wait — closing opens 1 minute after the last invoice reached the server -->
+          <div v-if="!hasPendingSync && closingWaitSeconds > 0 && !showSuccessReport" class="rounded-lg bg-amber-50 border border-amber-300 p-3 md:p-4 flex items-center gap-2">
+            <FeatherIcon name="clock" class="w-5 h-5 text-amber-600 flex-shrink-0" />
+            <div>
+              <p class="text-sm font-semibold text-amber-800">
+                {{ __('Tunggu {0} detik lagi untuk tutup shift', [closingWaitSeconds]) }}
+              </p>
+              <p class="text-xs text-amber-700 mt-0.5">
+                {{ __('Tutup shift baru bisa 1 menit setelah transaksi terakhir tersinkron ke server.') }}
+              </p>
+            </div>
+          </div>
+
           <!-- Shift Summary Header (hidden in entry mode when hideExpectedAmount is enabled) -->
           <div v-if="shouldShowSummary" class="bg-white border border-gray-200 rounded-lg p-3 md:p-6 shadow-sm">
             <div class="flex flex-col sm:flex-row justify-start items-start gap-3 mb-3 md:mb-6">
@@ -613,9 +626,13 @@
             theme="blue"
             @click="submitClosing"
             :loading="submitResource.loading"
-            :disabled="!canSubmit || hasPendingSync"
+            :disabled="!canSubmit || hasPendingSync || closingWaitSeconds > 0"
           >
-            {{ submitResource.loading ? __('Closing Shift...') : __('Close Shift') }}
+            {{ submitResource.loading
+              ? __('Closing Shift...')
+              : closingWaitSeconds > 0
+                ? __('Close Shift ({0}s)', [closingWaitSeconds])
+                : __('Close Shift') }}
           </Button>
 
           <!-- Print Button (only shown in report view) -->
@@ -690,6 +707,34 @@ const hasPendingSync = computed(
 	() => syncStore.pendingInvoicesCount > 0 || syncStore.isSyncing
 )
 
+// Closing opens CLOSING_WAIT_MS after the last invoice reached the ERP, so it
+// has finished posting that sale before the closing totals the shift. The
+// local server enforces the same rule (server/sync/lastInvoiceSync.js).
+const CLOSING_WAIT_MS = 60_000
+const now = ref(Date.now())
+let _clockTimer = null
+
+const closingWaitSeconds = computed(() => {
+	const last = syncStore.lastInvoiceSyncedAt
+	if (!last) return 0
+	return Math.max(0, Math.ceil((last + CLOSING_WAIT_MS - now.value) / 1000))
+})
+
+function startClock() {
+	stopClock()
+	now.value = Date.now()
+	_clockTimer = setInterval(() => {
+		now.value = Date.now()
+	}, 1000)
+}
+
+function stopClock() {
+	if (_clockTimer) {
+		clearInterval(_clockTimer)
+		_clockTimer = null
+	}
+}
+
 async function handleSyncNow() {
 	try {
 		await syncStore.syncAllPending()
@@ -752,6 +797,8 @@ watch(open, async (isOpen) => {
 		// Pause the shift duration counter in the header
 		shiftStore.shiftTimerPaused = true
 		showIdleWarning.value = false
+		startClock()
+		syncStore.updatePendingCount()
 
 		// Warn user if dialog stays open for more than 1 minute
 		_idleWarningTimer = setTimeout(() => {
@@ -765,6 +812,7 @@ watch(open, async (isOpen) => {
 		// Resume the shift duration counter
 		shiftStore.shiftTimerPaused = false
 		showIdleWarning.value = false
+		stopClock()
 		if (_idleWarningTimer) {
 			clearTimeout(_idleWarningTimer)
 			_idleWarningTimer = null
@@ -774,6 +822,7 @@ watch(open, async (isOpen) => {
 
 onBeforeUnmount(() => {
 	shiftStore.shiftTimerPaused = false
+	stopClock()
 	if (_idleWarningTimer) {
 		clearTimeout(_idleWarningTimer)
 		_idleWarningTimer = null

@@ -5,6 +5,7 @@ const { getDb } = require("../db/client");
 const { searchItems, searchCustomers } = require("../db/search-index");
 const { createOfflineShift, pushQueuedShifts, hasPendingShifts, remapOfflineShifts } = require("../sync/shifts");
 const { pushQueuedInvoices } = require("../sync/push");
+const { markInvoiceReachedServer, closingWaitRemainingMs } = require("../sync/lastInvoiceSync");
 
 const CLOSING_METHODS = new Set([
   "pos_next.api.shifts.get_closing_shift_data",
@@ -296,12 +297,24 @@ router.post("/:method", async (req, res) => {
           error: "Shift yang dibuka offline belum tersinkron ke server. Sinkronkan dulu sebelum tutup shift.",
         });
       }
+      // Give the ERP a minute after the last sale reached it before the
+      // closing totals the shift — checked here too, not just in the dialog.
+      const waitMs = method === "pos_next.api.shifts.submit_closing_shift" ? closingWaitRemainingMs() : 0;
+      if (waitMs > 0) {
+        return res.status(409).json({
+          error: `Tunggu ${Math.ceil(waitMs / 1000)} detik lagi — tutup shift baru bisa 1 menit setelah transaksi terakhir tersinkron.`,
+        });
+      }
       params = JSON.parse(remapOfflineShifts(JSON.stringify(params)));
     }
     if (method === "pos_next.api.shifts.check_opening_shift" && hasPendingShifts()) {
       await pushQueuedShifts().catch(() => {});
     }
     let result = await callMethod(method, params);
+
+    if (method === "pos_next.api.invoices.submit_invoice") {
+      markInvoiceReachedServer();
+    }
 
     // Promos are always read live from the ERP, and every live answer is also
     // written to the offline cache right here, so what a cashier sees offline

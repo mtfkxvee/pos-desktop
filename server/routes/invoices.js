@@ -5,6 +5,7 @@ const { callMethod } = require("../frappe-client");
 const { pingServer } = require("../sync/ping");
 const { loadDeviceConfig } = require("../auth/device-setup");
 const { markCheckoutActivity } = require("../sync/activity");
+const { markInvoiceReachedServer } = require("../sync/lastInvoiceSync");
 
 const router = express.Router();
 
@@ -54,6 +55,7 @@ router.post("/", async (req, res) => {
       const submitted = await callMethod("pos_next.api.invoices.submit_invoice", {
         data: JSON.stringify({ invoice: { ...invoice, name: draftName }, data: data || {} }),
       });
+      markInvoiceReachedServer();
       return res.json({
         ok: true,
         online: true,

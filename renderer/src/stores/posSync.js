@@ -57,6 +57,10 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 	/** The local server's own background push is running (scheduler) */
 	const backgroundSyncing = ref(false)
 
+	/** ms timestamp of when an invoice last reached the ERP (null = never).
+	 *  Shift closing waits a minute after this — see server/sync/lastInvoiceSync.js */
+	const lastInvoiceSyncedAt = ref(null)
+
 	/** Whether a sync operation is in progress — either kind, so the header
 	 *  indicator keeps blinking for the whole time invoices are being sent */
 	const isSyncing = computed(() => manualSyncing.value || backgroundSyncing.value)
@@ -125,6 +129,7 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 			const status = await offlineWorker.getQueueStatus()
 			pendingInvoicesCount.value = (status.pending || 0) + (status.failed || 0)
 			backgroundSyncing.value = !!status.syncing
+			lastInvoiceSyncedAt.value = Date.parse(status.lastSyncedAt || "") || null
 		} catch (error) {
 			log.error("Failed to get pending invoice count", error)
 		}
@@ -473,11 +478,13 @@ export const usePOSSyncStore = defineStore("posSync", () => {
 		pendingInvoicesCount,
 		isSyncing,
 		pendingInvoicesList,
+		lastInvoiceSyncedAt,
 
 		// Computed
 		hasPendingInvoices,
 
 		// Actions
+		updatePendingCount,
 		saveInvoiceOffline,
 		loadPendingInvoices,
 		deleteOfflineInvoice,
