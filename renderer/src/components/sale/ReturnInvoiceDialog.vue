@@ -865,6 +865,12 @@ const loadPaymentMethodsResource = createResource({
 	onSuccess(data) {
 		if (data && data.payments) {
 			paymentMethods.value = data.payments
+			// An invoice settled by Payment Entry has no payments rows, so the
+			// refund row may have been created before methods loaded — fill it.
+			const firstRow = refundPayments.value[0]
+			if (firstRow && !firstRow.mode_of_payment) {
+				firstRow.mode_of_payment = data.payments[0]?.mode_of_payment || ""
+			}
 		}
 	},
 	onError(error) {
@@ -930,30 +936,26 @@ const fetchInvoiceResource = createResource({
 			}))
 			returnItems.value.forEach(normalizeItemQuantity)
 
-			// Calculate payment totals from original invoice for refund handling
-			const totalPaidFromPayments =
-				origInvoice.payments?.reduce(
-					(sum, p) => sum + Math.abs(p.amount || 0),
-					0,
-				) || 0
-			originalPaidAmount.value =
-				origInvoice.paid_amount || totalPaidFromPayments || 0
-			originalOutstandingAmount.value = origInvoice.outstanding_amount || 0
+			// Derive what was actually collected from the server-fresh
+			// outstanding_amount, not from `payments`/`paid_amount`. A piutang
+			// settled later through a Payment Entry lowers outstanding_amount but
+			// leaves the invoice's payments table empty and paid_amount at 0, so
+			// those fields would wrongly route a paid-off invoice to the
+			// "credit sale, no cash refund" path (ported from pos_next d3d5499).
+			const grandTotal = Number(origInvoice.grand_total) || 0
+			const outstandingAmount = Number(origInvoice.outstanding_amount) || 0
+			originalPaidAmount.value = Math.max(0, grandTotal - outstandingAmount)
+			originalOutstandingAmount.value = outstandingAmount
 
-			// Detect credit sale (Pay on Account): no payments recorded OR full amount outstanding.
-			// Credit sales don't require cash refund - they reverse the accounts receivable.
-			const hasNoPayments =
-				!origInvoice.payments || origInvoice.payments.length === 0
-			const isFullyUnpaid =
-				Math.abs(origInvoice.outstanding_amount - origInvoice.grand_total) <
-				0.01
+			// Credit sale only while nothing has been collected yet: outstanding
+			// still equals the full grand total right now.
 			isOriginalCreditSale.value =
-				hasNoPayments || (totalPaidFromPayments < 0.01 && isFullyUnpaid)
+				grandTotal > 0 && Math.abs(outstandingAmount - grandTotal) < 0.01
 
-			// Detect partial payment: some amount paid but still has outstanding balance.
-			// Partial payments require proportional refund calculation.
+			// Partial payment: some collected, some still outstanding — refund is
+			// proportional to what was collected.
 			isPartiallyPaid.value =
-				originalPaidAmount.value > 0 && originalOutstandingAmount.value > 0
+				originalPaidAmount.value > 0.01 && originalOutstandingAmount.value > 0.01
 
 			// Load payment methods if not already loaded
 			if (paymentMethods.value.length === 0 && props.posProfile) {
