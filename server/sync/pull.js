@@ -83,6 +83,11 @@ function syncedAgo(state) {
 // skipped for being too recent. `<table>:full` remembers when and for which
 // profile the last full pull ran — switching profile needs a full one too.
 // `forceFull` is the manual Sync button: always pull everything, right now.
+// A full catalog pull is tens of thousands of rows — on a slow ERP that can
+// genuinely take minutes, and it runs in the background, so it gets far more
+// room than frappe-client's default before being abandoned.
+const FULL_PULL_TIMEOUT_MS = 10 * 60 * 1000;
+
 async function fetchChangedRows(table, deltaMethod, key, posProfile, legacyFetch, forceFull) {
   const state = getSyncState(table);
   if (Date.now() - deltaMissingAt > DELTA_RECHECK_MS) {
@@ -93,10 +98,11 @@ async function fetchChangedRows(table, deltaMethod, key, posProfile, legacyFetch
       full?.last_modified !== posProfile ||
       syncedAgo(full) > FULL_PULL_INTERVAL_MS;
     try {
-      const res = await callMethod(deltaMethod, {
-        pos_profile: posProfile,
-        since: isFull ? null : state.last_modified,
-      });
+      const res = await callMethod(
+        deltaMethod,
+        { pos_profile: posProfile, since: isFull ? null : state.last_modified },
+        { timeoutMs: FULL_PULL_TIMEOUT_MS }
+      );
       return { rows: res?.[key] || [], serverTime: res?.server_time || null, isFull };
     } catch (err) {
       if (!isMissingMethod(err)) throw err;
@@ -140,7 +146,7 @@ async function pullItems(posProfile, { full = false } = {}) {
         // default behavior — this flag only controls what gets STORED locally.
         // (get_items_delta always includes variants for the same reason.)
         include_variants: 1,
-      }),
+      }, { timeoutMs: FULL_PULL_TIMEOUT_MS }),
     full
   );
   if (!fetched) return { skipped: true };
@@ -186,7 +192,7 @@ async function pullCustomers(posProfile, { full = false } = {}) {
         pos_profile: posProfile,
         start: 0,
         limit: 100000,
-      }),
+      }, { timeoutMs: FULL_PULL_TIMEOUT_MS }),
     full
   );
   if (!fetched) return { skipped: true };

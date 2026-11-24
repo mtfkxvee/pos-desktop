@@ -16,13 +16,14 @@
  */
 
 import { setConfig } from "frappe-ui";
+import { rpcUrl } from "./rpcLanes";
 
 const LOCAL_SERVER_BASE = "http://127.0.0.1:8871";
 
 function request(options) {
   let url = options.url;
   if (!url.startsWith("/") && !url.startsWith("http")) {
-    url = `${LOCAL_SERVER_BASE}/rpc/${url}`;
+    url = rpcUrl(url);
   } else if (url.startsWith("/")) {
     url = `${LOCAL_SERVER_BASE}${url}`;
   }

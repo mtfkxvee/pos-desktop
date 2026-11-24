@@ -247,11 +247,30 @@ function startServer({ port = 8871, dbPath } = {}) {
   // process boot, so the scheduler only makes sense once /auth/login
   // succeeds (see above).
 
-  return new Promise((resolve, reject) => {
-    const server = app.listen(port, "127.0.0.1", () => {
-      resolve({ app, server, port });
+  const listen = (p) =>
+    new Promise((resolve, reject) => {
+      const s = app.listen(p, "127.0.0.1", () => resolve(s));
+      s.on("error", reject);
     });
-    server.on("error", reject);
+
+  return listen(port).then(async (server) => {
+    // Second "live" port, same app. Chromium allows only 6 connections per
+    // host:port, and /rpc calls that pass through to the ERP hold theirs for
+    // as long as the ERP takes. On a slow server a handful of those (order
+    // monitor, customer balance, offers…) filled all 6, and the cashier's
+    // purely local item search / checkout queued behind them — "No results"
+    // while the server was merely slow. The renderer routes pass-through
+    // calls here (see GET /rpc/_lanes) so they only ever compete with each
+    // other. Optional: if the port is taken, everything stays on `port`.
+    const livePort = port + 1;
+    try {
+      const liveServer = await listen(livePort);
+      app.locals.livePort = livePort;
+      server.on("close", () => liveServer.close());
+    } catch (err) {
+      console.warn(`[server] live port ${livePort} unavailable (${err.code || err.message}), using ${port} only`);
+    }
+    return { app, server, port };
   });
 }
 

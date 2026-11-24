@@ -322,6 +322,14 @@
 			</div>
 		</div>
 
+		<!-- Search still running — never claim "No results" before the answer is in -->
+		<div v-else-if="searching && searchTerm && (!filteredItems || filteredItems.length === 0)" class="flex-1 flex items-center justify-center p-3">
+			<div class="text-center py-8">
+				<div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500 mx-auto"></div>
+				<p class="mt-3 text-xs text-gray-500">{{ __('Searching...') }}</p>
+			</div>
+		</div>
+
 		<!-- Empty State - Only show when NOT loading and truly no items -->
 		<div
 			v-else-if="!loading && (!filteredItems || filteredItems.length === 0)"
@@ -874,6 +882,7 @@ const {
 	itemGroups,
 	loading,
 	loadingMore,
+	searching,
 	hasMore,
 	cacheSyncing,
 	cacheStats,

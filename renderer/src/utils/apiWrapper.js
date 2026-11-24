@@ -1,4 +1,4 @@
-const LOCAL_SERVER_BASE = "http://127.0.0.1:8871";
+import { rpcUrl } from "./rpcLanes";
 
 /**
  * Desktop build: frappe-ui's own exported `call()` is a standalone function
@@ -15,7 +15,7 @@ const LOCAL_SERVER_BASE = "http://127.0.0.1:8871";
  * it straight from frappe-ui.
  */
 export async function call(method, params = {}) {
-  const res = await fetch(`${LOCAL_SERVER_BASE}/rpc/${method}`, {
+  const res = await fetch(rpcUrl(method), {
     method: "POST",
     headers: { "Content-Type": "application/json; charset=utf-8" },
     body: JSON.stringify(params || {}),

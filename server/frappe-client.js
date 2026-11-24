@@ -43,18 +43,42 @@ function serverMessages(json) {
   }
 }
 
-async function callMethod(method, params = {}, { httpMethod = "POST" } = {}) {
+// Every ERP call is bounded. Without a limit a slow (not dead) server kept
+// each request open for minutes — Node's fetch only gives up after ~5 min —
+// so pulls, pushes and proxied /rpc calls piled up behind it.
+const DEFAULT_TIMEOUT_MS = 120 * 1000;
+
+/**
+ * @param {object} [opts]
+ * @param {number} [opts.timeoutMs] abort after this long (0 = no limit).
+ */
+async function callMethod(method, params = {}, { httpMethod = "POST", timeoutMs = DEFAULT_TIMEOUT_MS } = {}) {
   const url = `${getBaseUrl()}/api/method/${method}`;
   const headers = {
     Authorization: getAuthHeader(),
     "Content-Type": "application/json",
   };
 
-  const res = await fetch(url, {
-    method: httpMethod,
-    headers,
-    body: httpMethod === "GET" ? undefined : JSON.stringify(params),
-  });
+  const controller = new AbortController();
+  const timer = timeoutMs > 0 ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  let res;
+  let json;
+  try {
+    res = await fetch(url, {
+      method: httpMethod,
+      headers,
+      body: httpMethod === "GET" ? undefined : JSON.stringify(params),
+      signal: controller.signal,
+    });
+    json = await res.json().catch(() => null);
+  } catch (err) {
+    if (err?.name === "AbortError") {
+      throw new Error(`${method} gagal: server tidak merespons dalam ${Math.round(timeoutMs / 1000)} detik`);
+    }
+    throw err;
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 
   // A body that fails to parse (e.g. genuinely empty, which Frappe sends for
   // a whitelisted method that returns None) must NOT become `{}` here — `{}`
@@ -62,7 +86,7 @@ async function callMethod(method, params = {}, { httpMethod = "POST" } = {}) {
   // "is there an open shift" check) would wrongly treat "no data" as "found
   // something empty", the exact bug that let an empty-object cache entry
   // masquerade as an open shift and skip the shift-opening screen.
-  const json = await res.json().catch(() => null);
+  // (Parsed inside the try above so the body read is bounded by the timeout too.)
   if (!res.ok) {
     const message =
       serverMessages(json) || json?.exception || json?.exc_type || json?.message || `HTTP ${res.status}`;

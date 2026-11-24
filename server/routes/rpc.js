@@ -240,6 +240,22 @@ function ensureProfileDataCached(profileName) {
     .catch(() => {});
 }
 
+// The renderer sends every method NOT in this list to the separate "live"
+// port (server/index.js), so requests stuck waiting on a slow ERP can never
+// use up the browser's per-host connection limit and queue the local
+// search/cart/checkout calls behind them.
+router.get("/_lanes", (req, res) => {
+  res.json({ localMethods: Object.keys(OFFLINE_FALLBACK), livePort: req.app.locals.livePort || null });
+});
+
+// Reads proxied for the cashier's screen give up quickly; a slow ERP then
+// looks like "offline" for that one call (stale fallback / error) instead of
+// a spinner that never ends. Writes keep frappe-client's long default — the
+// ERP may still be processing them, and cutting them off invites a
+// duplicate on retry.
+const READ_TIMEOUT_MS = 20 * 1000;
+const READ_METHOD = /\.(get|check|search|validate|apply|has)_[a-z_]*$|^frappe\.client\.get/;
+
 router.post("/:method", async (req, res) => {
   const method = req.params.method;
   let params = req.body || {};
@@ -310,7 +326,11 @@ router.post("/:method", async (req, res) => {
     if (method === "pos_next.api.shifts.check_opening_shift" && hasPendingShifts()) {
       await pushQueuedShifts().catch(() => {});
     }
-    let result = await callMethod(method, params);
+    let result = await callMethod(
+      method,
+      params,
+      READ_METHOD.test(method) && !CLOSING_METHODS.has(method) ? { timeoutMs: READ_TIMEOUT_MS } : undefined
+    );
 
     if (method === "pos_next.api.invoices.submit_invoice") {
       markInvoiceReachedServer();

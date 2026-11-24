@@ -46,6 +46,21 @@ async function pingServer({ timeoutMs = 3000, fresh = false } = {}) {
   if (!fresh && now - lastCheckedAt < CACHE_TTL_MS) {
     return lastKnownOnline;
   }
+  // Stale-while-revalidate: once there is any answer at all, a normal caller
+  // gets it straight away and the re-check runs in the background. Waiting
+  // here cost up to 2 × timeoutMs (one retry) whenever the ERP was slow —
+  // and /sync/status (polled every 5s) plus every proxied /rpc call sat on
+  // that wait, holding one of the renderer's few connections to this server
+  // the whole time. A wrong "online" for a few seconds is harmless: the real
+  // call then fails/times out and falls back exactly as it would offline.
+  if (!fresh && lastCheckedAt > 0) {
+    refresh(timeoutMs).catch(() => {});
+    return lastKnownOnline;
+  }
+  return refresh(timeoutMs);
+}
+
+function refresh(timeoutMs) {
   // Coalesce concurrent callers (e.g. two /rpc requests firing back-to-back)
   // into a single in-flight ping instead of racing two separate ones.
   if (inFlight) return inFlight;
