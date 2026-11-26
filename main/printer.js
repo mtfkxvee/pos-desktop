@@ -354,8 +354,81 @@ async function printReceipt(invoiceData, companyAddress, config) {
   printer.println("Terima kasih, sampai jumpa lagi.");
   printer.cut();
 
+  appendParkingSlip(printer, invoiceData, companyAddress);
+
   await sendBuffer(printer.getBuffer(), config);
   return { success: true };
+}
+
+// The only items in ERP that are parking fees (checked against the live Item
+// list: every other "park" match is unrelated stock, e.g. a toy named
+// "PARKING LOT"). Matched by code, not name, for that reason.
+const PARKING_ITEM_CODES = new Set([
+  "STO-ITEM-2026-00294", // PARKIR MOTOR
+  "STO-ITEM-2026-00295", // PARKIR MOBIL
+]);
+
+// "yyyy-mm-dd" → "dd/mm/yyyy".
+function slashDate(d) {
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(d || ""));
+  return m ? `${m[3]}/${m[2]}/${m[1]}` : String(d || "");
+}
+
+/**
+ * "BUKTI BAYAR PARKIR": a separate slip, cut off below the receipt, that the
+ * customer hands to the parking attendant on the way out. Printed only when
+ * the invoice has a parking item, and never for a return.
+ */
+function appendParkingSlip(printer, invoiceData, companyAddress) {
+  if (invoiceData.is_return) return;
+  const parkingItems = (invoiceData.items || []).filter((i) => PARKING_ITEM_CODES.has(i.item_code));
+  if (!parkingItems.length) return;
+
+  printer.alignCenter();
+  printer.bold(true);
+  printer.println(companyAddress?.address_title || invoiceData.company || "");
+  printer.bold(false);
+  if (companyAddress?.address_line1) printer.println(companyAddress.address_line1);
+  printer.drawLine();
+  printer.bold(true);
+  printer.println("BUKTI BAYAR PARKIR");
+  printer.bold(false);
+  printer.drawLine();
+
+  printer.alignLeft();
+  printer.println(`No. Nota : ${invoiceData.name}`);
+  printer.println(`Tanggal  : ${slashDate(invoiceData.posting_date)} ${shortTime(invoiceData.posting_time)}`);
+  printer.println(`Kasir    : ${String(invoiceData.owner || "").split("@")[0]}`);
+  printer.drawLine();
+
+  let total = 0;
+  for (const item of parkingItems) {
+    const qty = item.qty ?? item.quantity ?? 0;
+    const rate = item.price_list_rate ?? item.rate ?? 0;
+    const amount = Math.trunc(qty * rate) - (item.discount_amount > 0 ? item.discount_amount : 0);
+    total += amount;
+    printer.bold(true);
+    printer.leftRight(item.item_name || item.item_code, num(amount));
+    printer.bold(false);
+    printer.println(`${qty} x ${num(rate)}`);
+  }
+  printer.drawLine();
+
+  printer.bold(true);
+  printer.leftRight("TOTAL", rp(total));
+  printer.bold(false);
+  const modes = [...new Set((invoiceData.payments || []).filter((p) => Number(p.amount)).map((p) => p.mode_of_payment))];
+  if (modes.length) printer.leftRight(modes.join("/"), num(total));
+  printer.drawLine();
+
+  printer.alignCenter();
+  printer.bold(true);
+  printer.println("Serahkan nota ini ke petugas");
+  printer.println("parkir saat keluar");
+  printer.bold(false);
+  printer.println("Berlaku 1 kali, hari ini saja");
+  printer.println("Terima kasih");
+  printer.cut();
 }
 
 // "dd-mm-yyyy hh:mm", the closing report's date style.
