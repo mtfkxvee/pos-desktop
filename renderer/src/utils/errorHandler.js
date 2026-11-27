@@ -88,6 +88,9 @@ const SERVER_MESSAGE_RULES = [
 	[/\b(Item|Customer|Warehouse|Mode of Payment)\s+(.+?)\s+is disabled\b\.?/gi, (_, t, x) => `${FIELD_LABELS_ID[t.toLowerCase()] || t} ${x} dinonaktifkan.`],
 	[/Request Timed Out|timed out/gi, () => "Waktu habis menunggu server"],
 	[/Failed to fetch|NetworkError[^|]*/gi, () => "Tidak bisa terhubung ke server"],
+	// Bare Node fetch error, as stored by versions before frappe-client.js
+	// spelled it out — still sitting in last_error on queued invoices.
+	[/^fetch failed$/i, () => "Koneksi internet terputus/tidak stabil. Coba Sync lagi setelah koneksi normal."],
 ]
 
 /**

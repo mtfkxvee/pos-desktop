@@ -75,6 +75,17 @@ async function callMethod(method, params = {}, { httpMethod = "POST", timeoutMs 
     if (err?.name === "AbortError") {
       throw new Error(`${method} gagal: server tidak merespons dalam ${Math.round(timeoutMs / 1000)} detik`);
     }
+    // Node's fetch throws a bare TypeError("fetch failed") for any
+    // connection-level failure and keeps the real reason (ECONNRESET,
+    // ENOTFOUND, UND_ERR_CONNECT_TIMEOUT, ...) in err.cause. The bare text
+    // is all a cashier ever saw, with no hint it was just the connection.
+    if (err instanceof TypeError && err.message === "fetch failed") {
+      const reason = err.cause?.code || err.cause?.message;
+      throw new Error(
+        `${method} gagal: koneksi internet terputus/tidak stabil${reason ? ` (${reason})` : ""}. Coba Sync lagi setelah koneksi normal.`,
+        { cause: err }
+      );
+    }
     throw err;
   } finally {
     if (timer) clearTimeout(timer);
